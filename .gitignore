@@ -1,0 +1,6 @@
+.streamlit_home/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+out.txt
