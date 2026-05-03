@@ -46,17 +46,13 @@ karşılaştırmak isteyebilir. Local SQLite'a geçmiş kaydı (kullanıcı opt-
 "Çıkış sonucunu PDF olarak kaydet" — kullanıcı muhasebeci / eşine paylaşmak
 isteyebilir. ReportLab veya weasyprint.
 
-### 6. Sözleşme başlangıç tarihi tam parse (gün/ay/yıl) — ertelendi
-Şu an gauge'taki sadece YYYY okunuyor → süre tahmini yıl bazında, ±1 hata var.
-Garanti'de muhtemelen başka bir ekranda tam tarih (`07.06.2023` gibi) görünür.
-Onu OCR'la, `floor((bugün - başlangıç) / 365.25)` ile **kesin yıl** çıkar.
-
-`bes_parse.py`'a `_detect_sozlesme_baslangic_tarihi(boxes)` ekle. App'te
-`giris_yili` yerine bu kullanılabiliyorsa onu tercih et.
-
-**Erteleme nedeni:** İkinci ekran görüntüsü gerektiriyor → kullanıcı pratikliği
-düşüyor. Tek-screenshot akışı daha öncelikli. Üstelik #1 (gauge tespiti)
-çoğu durumu zaten kapatır.
+### 6. Sözleşme başlangıç tarihi tam parse (gün/ay/yıl) ✅ TAMAMLANDI
+Garanti mobil kompakt ekranında "BES Giriş Tarihi: 25/01/2009" tek satırda
+görünüyor → tek screenshot ile çıkarılabiliyor. `bes_parse.py`'a
+`_detect_bes_giris_tarihi(boxes)` eklendi (DD/MM/YYYY pattern, bbox-aware).
+`BesExtracted.bes_giris_tarihi` alanı, app.py auto-derive zincirinde
+gauge'taki giris_yili'na **tercih edilir** — `floor((bugün − tarih) / 365.25)`
+ile ay/gün dahil kesin yıl.
 
 ## Düşük öncelik / temizlik
 

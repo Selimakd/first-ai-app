@@ -139,6 +139,151 @@ def test_bir_yil_sure_alinir_tutar_son_rakami_alinmaz() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Senaryo G: BES Giriş Tarihi (DD/MM/YYYY) parse — Garanti mobil kompakt
+# ---------------------------------------------------------------------------
+
+
+def test_bes_giris_tarihi_ayni_satir_sagda() -> None:
+    """| BES Giriş Tarihi | 25/01/2009 |"""
+    from datetime import date
+
+    raw = [
+        _box(20, 100, 180, 30, "BES Giriş Tarihi"),
+        _box(400, 100, 140, 30, "25/01/2009"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.bes_giris_tarihi == date(2009, 1, 25)
+
+
+def test_bes_giris_tarihi_emeklilik_tarihiyle_karismaz() -> None:
+    """Aynı ekranda iki tarih: BES Giriş Tarihi + Emeklilik Tarihiniz.
+    Parser, BES Giriş Tarihi etiketinin yanındakini seçmeli."""
+    from datetime import date
+
+    raw = [
+        _box(20, 100, 180, 30, "BES Giriş Tarihi"),
+        _box(400, 100, 140, 30, "25/01/2009"),
+        _box(20, 200, 200, 30, "Emeklilik Tarihiniz"),
+        _box(400, 200, 140, 30, "04/08/2041"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.bes_giris_tarihi == date(2009, 1, 25)
+
+
+def test_bes_giris_tarihi_inline_etiket_kutusu_icinde() -> None:
+    """OCR bazen «BES Giriş Tarihi: 25/01/2009» tek kutuya sığdırır."""
+    from datetime import date
+
+    raw = [
+        _box(20, 100, 380, 30, "BES Giriş Tarihi: 25/01/2009"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.bes_giris_tarihi == date(2009, 1, 25)
+
+
+def test_bes_giris_tarihi_yoksa_none() -> None:
+    """Etiket yoksa veya tarih yoksa None döner — krasher değil."""
+    raw = [
+        _box(20, 100, 180, 30, "Birikiminiz"),
+        _box(20, 140, 180, 30, "100.000,00 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.bes_giris_tarihi is None
+
+
+# ---------------------------------------------------------------------------
+# Senaryo H: «Devlet Katkısı Birikiminiz» (toplam) — yeni Garanti mobil kompakt varyant
+# Eski varyantta tek başlık «Devlet Katkısı» toplamı verirdi.
+# Yeni varyantta «Devlet Katkısı» yatırılan tutarı, «Devlet Katkısı Birikiminiz» toplamı.
+# Parser, «Devlet Katkısı Birikiminiz» varsa onu öncelikli almalı (uzun phrase).
+# ---------------------------------------------------------------------------
+
+
+def test_devlet_katkisi_birikiminiz_oncelikli() -> None:
+    """Yeni varyant: «Devlet Katkısı Birikiminiz» (toplam) tercih edilir."""
+    raw = [
+        # Yatırılan ana tutar
+        _box(20, 100, 200, 30, "Devlet Katkısı"),
+        _box(400, 100, 140, 30, "31.725,25 TL"),
+        # Toplam birikim — bunu seçmeliyiz
+        _box(20, 200, 320, 30, "Devlet Katkısı Birikiminiz"),
+        _box(400, 200, 140, 30, "82.799,73 TL"),
+        # Getiri
+        _box(20, 300, 280, 30, "Devlet Katkısı Getirisi"),
+        _box(400, 300, 140, 30, "51.074,48 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.devlet_katkisi == 82_799.73
+
+
+def test_eski_varyant_devlet_katkisi_toplam_calismaya_devam() -> None:
+    """Eski ekran (Garanti web): «Devlet Katkısı» tek başına toplam idi.
+    Yeni eklenen «Birikiminiz» phrase'i eski varyantı kırmamalı."""
+    raw = [
+        _box(20, 100, 200, 30, "Devlet Katkısı"),
+        _box(400, 100, 140, 30, "16.217,00 TL"),
+        _box(20, 200, 280, 30, "Yatırılan Devlet Katkısı"),
+        _box(400, 200, 140, 30, "4.455,00 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.devlet_katkisi == 16_217.00
+
+
+def test_birikiminiz_devlet_katkisi_birikiminizden_etkilenmez() -> None:
+    """Hem «Birikiminiz» hem «Devlet Katkısı Birikiminiz» varsa: kullanıcı birikimi (ilk) seçilir."""
+    raw = [
+        _box(20, 100, 150, 30, "Birikiminiz"),
+        _box(400, 100, 160, 30, "609.820,01 TL"),
+        _box(20, 200, 320, 30, "Devlet Katkısı Birikiminiz"),
+        _box(400, 200, 140, 30, "82.799,73 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.birikiminiz == 609_820.01
+    assert out.devlet_katkisi == 82_799.73
+
+
+# ---------------------------------------------------------------------------
+# Senaryo I: Tam Garanti mobil kompakt screenshot simülasyonu (e2e bbox)
+# ---------------------------------------------------------------------------
+
+
+def test_garanti_mobil_kompakt_full_screen() -> None:
+    """Eşinin yeni kompakt ekranı: tüm değerler + BES Giriş Tarihi + 3 devlet katkı satırı."""
+    from datetime import date
+
+    raw = [
+        # Tarih satırları
+        _box(20, 100, 200, 30, "BES Giriş Tarihi"),
+        _box(800, 100, 180, 30, "25/01/2009"),
+        _box(20, 200, 220, 30, "Emeklilik Tarihiniz"),
+        _box(800, 200, 180, 30, "04/08/2041"),
+        # Aylık katkı (gürültü — hesaba sızmamalı)
+        _box(20, 300, 240, 30, "Toplam Katkı Payınız"),
+        _box(800, 300, 240, 30, "3.250,00 TL / AYLIK"),
+        # Birikim ve katkılar
+        _box(20, 400, 150, 30, "Birikiminiz"),
+        _box(800, 400, 180, 30, "609.820,01 TL"),
+        _box(20, 500, 240, 30, "Ödenen Toplam Tutar"),
+        _box(800, 500, 180, 30, "119.192,22 TL"),
+        _box(20, 600, 200, 30, "Yatırım Getiriniz"),
+        _box(800, 600, 180, 30, "490.627,79 TL"),
+        # Devlet katkısı 3'lü blok
+        _box(20, 700, 320, 30, "Devlet Katkısı Birikiminiz"),
+        _box(800, 700, 180, 30, "82.799,73 TL"),
+        _box(20, 800, 200, 30, "Devlet Katkısı"),
+        _box(800, 800, 180, 30, "31.725,25 TL"),
+        _box(20, 900, 280, 30, "Devlet Katkısı Getirisi"),
+        _box(800, 900, 180, 30, "51.074,48 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.birikiminiz == 609_820.01
+    assert out.odenen_toplam_tutar == 119_192.22
+    assert out.yatirim_getiriniz == 490_627.79
+    assert out.devlet_katkisi == 82_799.73  # toplam, yatırılan değil
+    assert out.bes_giris_tarihi == date(2009, 1, 25)
+
+
+# ---------------------------------------------------------------------------
 # Senaryo G: Boş / bozuk girdi
 # ---------------------------------------------------------------------------
 

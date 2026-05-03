@@ -13,7 +13,7 @@ OCR sonuçları alanlara birleştirilir.
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import date, datetime
 
 import streamlit as st
 from PIL import Image
@@ -136,6 +136,7 @@ if st.session_state.pop("_do_clear_all", False):
     st.session_state.pop("_oran_ocr_turetildi", None)
     st.session_state.pop("_he_ocr_turetildi", None)
     st.session_state.pop("_sure_giris_yili_turetildi", None)
+    st.session_state.pop("_sure_baslangic_tarihinden_turetildi", None)
     st.session_state.pop("_last_ocr_file_sig", None)
     st.session_state["cikis_sozlesme_tipi"] = "devlet_katkisiz"
     st.rerun()
@@ -270,13 +271,22 @@ if (run or _auto_run) and files:
     else:
         st.session_state.pop("_birikim_ocr_turetildi", None)
 
-    # Süre OCR'da yoksa ama gauge altındaki «YYYY GİRİŞ» tespit edildiyse:
-    # (current_year - giris_yili - 1) yıl tahmini yap. Sebebi: ay/gün bilinmediği için
-    # calendar yıl farkı OVERSHOOT eder (ör. giriş Haziran 2023, bugün Mayıs 2026 →
-    # gerçek 2 yıl 11 ay = 2 yıl, ama 2026−2023=3). Bir yıl conservative tıraşlama
-    # undershoot'a dönüştürür → kademede %15 yerine %0 görünmesi kullanıcının
-    # gözünden kaçmaz, elle düzeltir; sessiz overshoot ise hesaba sızabilir.
-    if (
+    # Süre OCR'da yoksa, iki kaynaktan türet:
+    #   1. BES Giriş Tarihi (DD/MM/YYYY) — Garanti mobil kompakt ekran. Tam tarih
+    #      bilindiği için floor((bugün - tarih)/365.25) ile KESİN yıl çıkar.
+    #   2. Gauge'taki «YYYY GİRİŞ» — ay/gün bilinmediği için (current_year - gy - 1)
+    #      conservative tıraş. Sebebi: calendar yıl farkı OVERSHOOT eder, undershoot'a
+    #      dönüştürmek kullanıcının elle düzeltmesini sağlar (sessiz overshoot hesaba sızar).
+    # Tarih varsa daima tercih edilir (1 her zaman 2'den daha kesin).
+    if extracted_dict.get("hak_edise_esas_sure") is None and merged_extract.bes_giris_tarihi is not None:
+        bgt = merged_extract.bes_giris_tarihi
+        today = datetime.now().date()
+        days = (today - bgt).days
+        sure_yil = max(0, int(days // 365.25))
+        extracted_dict["hak_edise_esas_sure"] = float(sure_yil)
+        st.session_state["_sure_baslangic_tarihinden_turetildi"] = (bgt, today, sure_yil)
+        st.session_state.pop("_sure_giris_yili_turetildi", None)
+    elif (
         extracted_dict.get("hak_edise_esas_sure") is None
         and merged_extract.giris_yili is not None
     ):
@@ -285,8 +295,10 @@ if (run or _auto_run) and files:
         sure_tahmin = max(0, cy - gy - 1)
         extracted_dict["hak_edise_esas_sure"] = float(sure_tahmin)
         st.session_state["_sure_giris_yili_turetildi"] = (gy, cy, sure_tahmin)
+        st.session_state.pop("_sure_baslangic_tarihinden_turetildi", None)
     else:
         st.session_state.pop("_sure_giris_yili_turetildi", None)
+        st.session_state.pop("_sure_baslangic_tarihinden_turetildi", None)
 
     # Devlet katkılı sözleşmede (devlet_katkisi OCR'dan geldiyse) hak ediş oran ve
     # tutarını süreden türet — EGM kademeleri (3y/6y/10y → %15/%35/%60).
@@ -542,6 +554,14 @@ elif hesap_hazir:
             f"**Birikim otomatik türetildi:** Ödenen ({format_tl(odenen)}) + "
             f"Yatırım Getirisi ({format_tl(yg)}) = **{format_tl(b)} TL**. "
             "Birikim alanı boştu; üst kutuya elle bir değer yazarsanız o değer kullanılır."
+        )
+    sure_info_bgt = st.session_state.get("_sure_baslangic_tarihinden_turetildi")
+    if sure_info_bgt:
+        bgt, today_d, sy_t = sure_info_bgt
+        st.info(
+            f"**Süre BES Giriş Tarihi'nden hesaplandı:** {bgt.strftime('%d/%m/%Y')} → "
+            f"bugün ({today_d.strftime('%d/%m/%Y')}) = **{sy_t} yıl** "
+            "(floor((bugün − tarih) / 365,25); ay/gün dahil tam yıl)."
         )
     sure_info = st.session_state.get("_sure_giris_yili_turetildi")
     if sure_info:

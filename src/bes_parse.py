@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Literal
 
 Kind = Literal["money", "sure", "oran"]
@@ -57,6 +58,13 @@ FIELD_PHRASES: dict[str, tuple[str, ...]] = {
         "fon getirisi",  # Garanti mobil
     ),
     "devlet_katkisi": (
+        # Garanti mobil kompakt varyant: tek başlık altında yatırılan + getiri toplamı
+        # ("Devlet Katkısı Birikiminiz"). Eski varyantlarda "Devlet Katkısı" zaten toplam idi —
+        # uzun phrase _find_label_box'ta öncelikli olduğu için her iki varyantta da doğru kutu seçilir.
+        "devlet katkısı birikiminiz",
+        "devlet katkisi birikiminiz",
+        "devlet katkısı birikim",
+        "devlet katkisi birikim",
         "devlet katkısı",
         "devlet katkisi",
     ),
@@ -524,6 +532,10 @@ class BesExtracted:
     # kullanılır (current_year - giris_yili). to_dict()'e dahil DEĞİL — widget alanı
     # değil, ek metadata.
     giris_yili: int | None = None
+    # BES Giriş Tarihi (DD/MM/YYYY) — Garanti mobil kompakt ekranı bunu açıkça
+    # gösterir. Varsa giris_yili'na göre TERCİH EDİLİR (ay/gün dahil daha kesin).
+    # Yine to_dict()'te yok — metadata.
+    bes_giris_tarihi: date | None = None
     raw_lines: list[str] = field(default_factory=list)
     debug_matches: list[tuple[str, str, float | None]] = field(default_factory=list)
 
@@ -792,6 +804,10 @@ _FIELD_LABEL_EXCLUDE: dict[str, tuple[str, ...]] = {
     ),
     "birikiminiz": (
         "yatirilan",
+        # "Devlet Katkısı Birikiminiz" devlet katkısı toplamıdır — kullanıcının birikimi değil.
+        # Uzun phrase önceliği zaten doğru kutuyu seçer ama defansif: birikiminiz alanı için
+        # bu kutuyu hiç değerlendirme.
+        "devlet katkisi",
     ),
 }
 
@@ -1054,6 +1070,73 @@ def _pick_value(
     return v, b
 
 
+_BES_GIRIS_PHRASES: tuple[str, ...] = (
+    "bes giriş tarihi",
+    "bes giris tarihi",
+    "bes giriş",
+    "bes giris",
+)
+# DD/MM/YYYY veya DD.MM.YYYY veya DD-MM-YYYY (TR formatları). Yıl 1990–2100.
+_DATE_DDMMYYYY_RE = re.compile(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b")
+
+
+def _parse_date_string(text: str) -> date | None:
+    m = _DATE_DDMMYYYY_RE.search(text)
+    if not m:
+        return None
+    try:
+        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 1 <= d <= 31 and 1 <= mo <= 12 and 1990 <= y <= 2100:
+            return date(y, mo, d)
+    except (ValueError, OverflowError):
+        pass
+    return None
+
+
+def _detect_bes_giris_tarihi(boxes: list[_BBox]) -> date | None:
+    """BES Giriş Tarihi etiketinin yanındaki DD/MM/YYYY tarihini bbox uzamsal yakınlıkla çıkar.
+
+    Aynı satır sağda öncelikli (priority 0); yoksa altında aynı sütun (priority 1).
+    Eşit ekranda «Emeklilik Tarihiniz: 04/08/2041» gibi farklı tarihler de bulunabilir —
+    yalnızca «BES Giriş Tarihi» etiketine en yakın olan seçilir.
+    """
+    label = _find_label_box(boxes, _BES_GIRIS_PHRASES)
+    if label is None:
+        return None
+    # Inline (etiket kutusunun kendi metni içinde tarih varsa)
+    inline = _parse_date_string(label.text)
+    if inline is not None:
+        return inline
+    h = max(label.h, 1.0)
+    w = max(label.w, 1.0)
+    best_score: tuple[int, float] | None = None
+    best_date: date | None = None
+    for b in boxes:
+        if b is label:
+            continue
+        d_obj = _parse_date_string(b.text)
+        if d_obj is None:
+            continue
+        y_ov = _vertical_overlap(label, b)
+        same_row = (
+            y_ov >= 0.5 * min(h, b.h)
+            and b.x_min >= label.x_max - 0.1 * w
+        )
+        if same_row:
+            score = (0, max(0.0, b.x_min - label.x_max))
+        else:
+            below = b.y_min >= label.y_cen
+            x_ov = _horizontal_overlap(label, b)
+            x_aligned = x_ov > 0 or abs(b.x_cen - label.x_cen) < max(w, b.w) * 0.7
+            if not (below and x_aligned):
+                continue
+            score = (1, b.y_min - label.y_max)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_date = d_obj
+    return best_date
+
+
 _GIRIS_LABEL_RE = re.compile(r"^\s*(?:GİRİŞ|GIRIS|giriş|giris)\s*$", re.IGNORECASE)
 _GIRIS_INLINE_RE = re.compile(
     r"\b(20\d{2})\s*(?:GİRİŞ|giriş|GIRIS|giris)\b|"
@@ -1209,5 +1292,7 @@ def extract_from_ocr_boxes(raw: list[tuple[Any, str, float]]) -> BesExtracted:
 
     # Sözleşme giriş yılı — gauge altındaki «YYYY GİRİŞ» etiketinden
     out.giris_yili = _detect_giris_yili(boxes)
+    # BES Giriş Tarihi — varsa giris_yili'na tercih edilir (app.py auto-derive zinciri)
+    out.bes_giris_tarihi = _detect_bes_giris_tarihi(boxes)
 
     return out

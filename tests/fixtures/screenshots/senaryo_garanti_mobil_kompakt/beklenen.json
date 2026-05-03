@@ -1,0 +1,14 @@
+{
+  "aciklama": "Garanti mobil — kompakt tek-ekran devlet katkılı detay (BES Giriş Tarihi açık)",
+  "upscale": 1.5,
+  "sozlesme_tipi": "devlet_katkili",
+
+  "_not": "hak_edise_esas_sure parser çıktısında YOK — bu ekranda 'yıl' metni geçmiyor. App.py auto-derive zinciri bes_giris_tarihi'nden floor((bugün − tarih)/365.25) ile türetir; bugünün tarihine bağımlı olduğu için bu fixture'da assert edilmiyor. Aynı sebeple beklenen_hesap da yok.",
+
+  "beklenen_alanlar": {
+    "birikiminiz":          609820.01,
+    "odenen_toplam_tutar":  119192.22,
+    "yatirim_getiriniz":    490627.79,
+    "devlet_katkisi":       82799.73
+  }
+}
