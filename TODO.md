@@ -4,17 +4,29 @@ Cowork modunda yapılanların ardından kalanlar. Öncelik sırasıyla:
 
 ## Yüksek öncelik
 
-### 1. Web deployment
-Streamlit Cloud free tier'a EasyOCR fitmiyor (1GB RAM). 3 yol:
-- **Tailscale + Mac always-on** — özel, ücretsiz, basit
-- **HF Spaces** + parola gate — public URL, Mac kapalıyken çalışır
-- **Streamlit Cloud** + dış OCR API (Google Vision, ücretsiz tier) — refactor gerekir
+### 1. Gauge needle / cyan-fill ile süre tespiti (görüntü analizi)
+Bazı mobil layout'larda gauge altındaki "YYYY GİRİŞ" yazısı sığmıyor → bizim
+mevcut süre auto-derive zinciri (CLAUDE.md #2) çalışmıyor → kullanıcı süreyi
+elle girmek zorunda. Manuel akış artık çalışıyor (app.py'a hak ediş tutar/oran
+manuel türetmesi eklendi) ama UX ideal değil.
 
-İlgili dosya: `REVIEW.md`.
+Önerilen yaklaşım: **cyan-fill segment tespiti**.
+1. OCR ile "3. YIL", "6. YIL", "10. YIL" text'lerinin pixel koordinatlarını al → gauge merkezi + yarıçapı
+2. Her kademe segment'inin orta açısında pixel rengini sample'la
+3. Cyan (~RGB 60,200,200) ise dolu, gri ise boş
+4. En son dolu segment → süre kademesi (3y/6y/10y eşiklerine göre)
+
+Yeni modül `src/gauge_detect.py`. Auto-derive zincirine #2'den önce eklenir.
+Sentetik test fixture (3 kademe için PNG simülasyonu) + e2e regression. Tahmini
+1-2 saat. Alternatif (needle açısı) daha hassas ama daha gürültülü, kademe yeterli.
+
+### 2. Web deployment ✅ TAMAMLANDI
+HF Spaces + Docker SDK ile deploy edildi. Parola gate (APP_PASSWORD secret).
+URL: huggingface.co/spaces/Selimakd/bes-cikis. CPU Basic free tier yeterli.
 
 ## Orta öncelik
 
-### 2. Diğer şirket varyasyonları
+### 3. Diğer şirket varyasyonları
 Şu an Garanti web + mobil + 2 katkılı senaryo destekli. Test edilmemiş:
 Anadolu Hayat, Allianz, Ziraat, AvivaSA, Aegon, vb. Her şirketin etiket
 sözcüğü + layout farklı; `FIELD_PHRASES`'e yeni sinonimler + bbox toleransı.
@@ -26,15 +38,15 @@ Yeni şirket eklemek için akış:
 4. Test geçince `tests/fixtures/screenshots/senaryo_<sirket>_*/` altına PNG + `beklenen.json`
 5. Regression olarak `test_bes_parse_boxes.py`'a unit test ekle
 
-### 3. Çıkış ledger / hesap geçmişi
+### 4. Çıkış ledger / hesap geçmişi
 Streamlit session_state geçici. Kullanıcı farklı sözleşmeleri / tarihleri
 karşılaştırmak isteyebilir. Local SQLite'a geçmiş kaydı (kullanıcı opt-in).
 
-### 4. PDF rapor üretimi
+### 5. PDF rapor üretimi
 "Çıkış sonucunu PDF olarak kaydet" — kullanıcı muhasebeci / eşine paylaşmak
 isteyebilir. ReportLab veya weasyprint.
 
-### 5. Sözleşme başlangıç tarihi tam parse (gün/ay/yıl) — ertelendi
+### 6. Sözleşme başlangıç tarihi tam parse (gün/ay/yıl) — ertelendi
 Şu an gauge'taki sadece YYYY okunuyor → süre tahmini yıl bazında, ±1 hata var.
 Garanti'de muhtemelen başka bir ekranda tam tarih (`07.06.2023` gibi) görünür.
 Onu OCR'la, `floor((bugün - başlangıç) / 365.25)` ile **kesin yıl** çıkar.
@@ -43,12 +55,10 @@ Onu OCR'la, `floor((bugün - başlangıç) / 365.25)` ile **kesin yıl** çıkar
 `giris_yili` yerine bu kullanılabiliyorsa onu tercih et.
 
 **Erteleme nedeni:** İkinci ekran görüntüsü gerektiriyor → kullanıcı pratikliği
-düşüyor. Tek-screenshot akışı daha öncelikli.
+düşüyor. Tek-screenshot akışı daha öncelikli. Üstelik #1 (gauge tespiti)
+çoğu durumu zaten kapatır.
 
 ## Düşük öncelik / temizlik
-
-### 6. .gitignore
-`venv/`, `__pycache__/`, `.streamlit_home/`, `*.pyc`, `.DS_Store` ekle.
 
 ### 7. ORAN_PATTERN_NUM_FIRST regex küçük bug
 `(\d{1,3}(?:,\d{1,4})?|\d+(?:\.\d+)?)\s*%` — alternation sırası kötü. Bkz REVIEW.md.
