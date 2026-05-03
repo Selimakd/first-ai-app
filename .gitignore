@@ -6,3 +6,8 @@ __pycache__/
 out.txt
 .env
 .pytest_cache/
+
+# Screenshot binary'leri repo'da değil — HF Spaces Xet/LFS gerekir
+# Lokalde test fixture'ları için kalır, slow E2E için gerekli (pytest -m slow)
+test_screenshots/
+tests/fixtures/screenshots/**/*.png
