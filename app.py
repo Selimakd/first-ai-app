@@ -494,6 +494,23 @@ if b is None and odenen is not None and yg is not None:
 b_turetildi = b_turetildi_manuel or st.session_state.get("_birikim_ocr_turetildi", False)
 
 devlet_katkili = sozlesme_cikis == "devlet_katkili"
+
+# Manuel akışta hak ediş oran/tutar türetme: kullanıcı OCR sonrası süreyi elle yazdığında
+# (örneğin gauge'ta YYYY GİRİŞ olmayan layout'larda) hesap akışı bu blokla tamamlanır.
+# OCR sırasındaki paralel türetme yukarıda — bu blok yalnızca devlet katkılı senaryoda devreye girer.
+oran_user_input = _read_scalar("hak_edis_oraniniz")
+oran_turetildi_manuel = False
+he_turetildi_manuel = False
+if devlet_katkili and dk is not None and sy is not None:
+    if oran_user_input is not None:
+        oran_for_calc = oran_user_input
+    else:
+        oran_for_calc = hak_edis_orani_from_sure(sy)
+        oran_turetildi_manuel = he is None  # kullanıcı he'yi elle yazdıysa oran info'su gereksiz
+    if he is None:
+        he = hak_edis_tutari_from_oran(dk, oran_for_calc)
+        he_turetildi_manuel = True
+
 if devlet_katkili:
     gerekli = {
         "Birikiminiz": b,
@@ -538,14 +555,14 @@ elif hesap_hazir:
                 min=st_, max=st_ + 1, line="%0/%15/%35/%60"
             )
         )
-    if st.session_state.get("_oran_ocr_turetildi"):
+    if st.session_state.get("_oran_ocr_turetildi") or oran_turetildi_manuel:
         st.info(
             "**Hak ediş oranı otomatik türetildi:** EGM kademeli oranı "
             "(< 3 yıl %0, 3–6 yıl %15, 6–10 yıl %35, ≥ 10 yıl %60). "
             f"Süre **{sy:g} yıl** → **%{int(hak_edis_orani_from_sure(sy))}**. "
             "Yaş şartı dikkate alınmaz; kutuya elle yazarsanız o kullanılır."
         )
-    if st.session_state.get("_he_ocr_turetildi") and dk is not None and dk > 0:
+    if (st.session_state.get("_he_ocr_turetildi") or he_turetildi_manuel) and dk is not None and dk > 0:
         st.info(
             f"**Hak ediş tutarı otomatik türetildi:** Devlet katkısı ({format_tl(dk)}) × "
             f"oran ({(he_kullan / dk * 100):.0f}%) = **{format_tl(he_kullan)} TL**."
