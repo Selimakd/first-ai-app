@@ -1,8 +1,7 @@
 ---
 title: BES Cikis Hesaplama
-sdk: streamlit
-sdk_version: 1.40.0
-app_file: app.py
+sdk: docker
+app_port: 8501
 pinned: false
 ---
 
