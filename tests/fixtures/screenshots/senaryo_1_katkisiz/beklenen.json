@@ -1,0 +1,21 @@
+{
+  "aciklama": "Fon Koçu ekranı — devlet katkısız sözleşme, 1 yıl süre",
+  "upscale": 1.5,
+  "sozlesme_tipi": "devlet_katkisiz",
+
+  "beklenen_alanlar": {
+    "birikiminiz":          1161723.14,
+    "odenen_toplam_tutar":  903372.00,
+    "yatirim_getiriniz":    258351.14,
+    "devlet_katkisi":       null,
+    "hak_edise_esas_sure":  1,
+    "hak_edis_oraniniz":    100,
+    "hak_edis_tutariniz":   1161723.14
+  },
+
+  "beklenen_hesap": {
+    "uygulanan_stopaj_orani": 0.15,
+    "stopaj_kesintisi_tl":    38752.67,
+    "cikista_net_tl":         1122970.47
+  }
+}

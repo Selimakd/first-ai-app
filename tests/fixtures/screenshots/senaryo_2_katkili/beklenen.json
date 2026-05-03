@@ -1,0 +1,21 @@
+{
+  "aciklama": "Fon Koçu ekranı — devlet katkılı, 14 yıl süre, %60 hak ediş",
+  "upscale": 1.5,
+  "sozlesme_tipi": "devlet_katkili",
+
+  "beklenen_alanlar": {
+    "birikiminiz":          614954.37,
+    "odenen_toplam_tutar":  115942.22,
+    "yatirim_getiriniz":    499012.15,
+    "devlet_katkisi":       83187.26,
+    "hak_edise_esas_sure":  14,
+    "hak_edis_oraniniz":    60,
+    "hak_edis_tutariniz":   49912.35
+  },
+
+  "beklenen_hesap": {
+    "uygulanan_stopaj_orani": 0.10,
+    "stopaj_kesintisi_tl":    49901.22,
+    "cikista_net_tl":         614965.50
+  }
+}

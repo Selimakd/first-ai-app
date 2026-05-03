@@ -1,6 +1,9 @@
-# Yerel, ücretsiz OCR + arayüz (ilk çalıştırmada EasyOCR modelleri indirilir)
+# Yerel + cloud deploy (HF Spaces). CPU-only torch ile cold start ve disk küçülür.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
+torchvision==0.18.1+cpu
 easyocr>=1.7.0
-streamlit>=1.28.0
+streamlit>=1.40.0
 Pillow>=10.0.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0
 opencv-python-headless>=4.8.0

@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 .DS_Store
 out.txt
+.env
+.pytest_cache/

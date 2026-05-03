@@ -1,0 +1,3 @@
+# Geliştirici bağımlılıkları (yerel test için).
+# Kurulum:  venv/bin/pip install -r requirements-dev.txt
+pytest>=8.0.0

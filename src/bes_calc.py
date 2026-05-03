@@ -62,6 +62,38 @@ def cikista_ele_gecen_tl(
     )
 
 
+# ---------------------------------------------------------------------------
+# Devlet katkısı hak ediş oranı (BES mevzuatı, EGM)
+# ---------------------------------------------------------------------------
+# Sistemde kalma süresine göre kademeli oran (yaş şartı dikkate alınmaz):
+#   <  3 yıl  → %0
+#   3–6 yıl  → %15
+#   6–10 yıl → %35
+#   ≥ 10 yıl → %60
+# Not: Emeklilik (10 yıl + 56 yaş), vefat veya maluliyet durumunda %100 olur;
+# bu fonksiyon yalnızca süre tabanlı oranı verir.
+
+HAK_EDIS_KADEMELERI: tuple[tuple[float, float], ...] = (
+    (3.0,   0.0),    # < 3 yıl  → %0
+    (6.0,  15.0),    # 3–6 yıl  → %15
+    (10.0, 35.0),    # 6–10 yıl → %35
+    (float("inf"), 60.0),  # ≥ 10 yıl → %60
+)
+
+
+def hak_edis_orani_from_sure(sure_yil: float) -> float:
+    """Devlet katkısı hak ediş oranı (yüzde olarak, ör. 60.0)."""
+    for esik, oran in HAK_EDIS_KADEMELERI:
+        if sure_yil < esik:
+            return oran
+    return HAK_EDIS_KADEMELERI[-1][1]
+
+
+def hak_edis_tutari_from_oran(devlet_katkisi_tl: float, oran_yuzde: float) -> float:
+    """Hak ediş tutarı = devlet katkısı × oran/100. Kuruşa yuvarlar."""
+    return round(devlet_katkisi_tl * oran_yuzde / 100.0, 2)
+
+
 def format_tl(n: float) -> str:
     """Basit TR gösterim (tam sayı kuruşlar için yeterli)."""
     s = f"{n:,.2f}"

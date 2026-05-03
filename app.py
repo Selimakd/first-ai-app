@@ -12,11 +12,26 @@ OCR sonuçları alanlara birleştirilir.
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
+
 import streamlit as st
 from PIL import Image
 
-from src.bes_calc import cikista_ele_gecen_tl, format_tl, stopaj_kesintisi_tl, stopaj_orani
-from src.bes_parse import extract_from_ocr_lines, infer_devlet_katkili_sozlesme, tr_amount_to_float
+from src.bes_calc import (
+    cikista_ele_gecen_tl,
+    format_tl,
+    hak_edis_orani_from_sure,
+    hak_edis_tutari_from_oran,
+    stopaj_kesintisi_tl,
+    stopaj_orani,
+)
+from src.bes_parse import (
+    extract_from_ocr_boxes,
+    extract_from_ocr_lines,
+    infer_devlet_katkili_sozlesme,
+    tr_amount_to_float,
+)
 from src.ocr_engine import read_text, sorted_lines
 
 # Tarayıcı sekmesi + sayfa başlığı; yeni sürümün yüklendiğini görmek için anlamlı her değişiklikte artırın (1.1 → 1.2 …).
@@ -65,6 +80,22 @@ def _apply_extraction_to_widgets(extracted: dict, mode: str) -> None:
 
 
 st.set_page_config(page_title=APP_DISPLAY_NAME, layout="wide")
+
+# Parola gate (HF Spaces deployment). APP_PASSWORD env var set değilse (lokal dev)
+# kapı açık. HF Spaces "Settings → Repository secrets" altından girilir.
+_APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+if _APP_PASSWORD and not st.session_state.get("_auth_ok"):
+    st.title(APP_DISPLAY_NAME)
+    st.subheader("Şifre")
+    _pwd = st.text_input("Şifre", type="password", label_visibility="collapsed")
+    if _pwd:
+        if _pwd == _APP_PASSWORD:
+            st.session_state["_auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("Yanlış şifre")
+    st.stop()
+
 st.title(APP_DISPLAY_NAME)
 st.caption(
     "Veriler yalnızca bu bilgisayarda işlenir. OCR: EasyOCR (Türkçe + İngilizce). "
@@ -101,6 +132,11 @@ if st.session_state.pop("_do_clear_all", False):
     st.session_state.ocr_chunks = []
     st.session_state.pop("last_ocr_birlesik", None)
     st.session_state.pop("last_ocr_eslesme", None)
+    st.session_state.pop("_birikim_ocr_turetildi", None)
+    st.session_state.pop("_oran_ocr_turetildi", None)
+    st.session_state.pop("_he_ocr_turetildi", None)
+    st.session_state.pop("_sure_giris_yili_turetildi", None)
+    st.session_state.pop("_last_ocr_file_sig", None)
     st.session_state["cikis_sozlesme_tipi"] = "devlet_katkisiz"
     st.rerun()
 
@@ -117,6 +153,21 @@ uploaded = st.file_uploader(
 
 files = _normalize_uploaded_files(uploaded)
 
+# Tek dosyada otomatik OCR — yeni dosya yüklendiğinde butona basmadan çalışsın.
+# Çoklu dosyada hâlâ butona basılır (kullanıcı tüm parçaları seçtikten sonra).
+_current_file_sig: tuple | None = None
+if files:
+    f0 = files[0]
+    _current_file_sig = (f0.name, getattr(f0, "size", None), len(files))
+else:
+    st.session_state.pop("_last_ocr_file_sig", None)
+_auto_run = (
+    files is not None
+    and len(files) == 1
+    and _current_file_sig is not None
+    and _current_file_sig != st.session_state.get("_last_ocr_file_sig")
+)
+
 col_left, col_right = st.columns(2)
 with col_left:
     upscale = st.slider("OCR için büyütme (küçük yazılarda artırın)", 1.0, 2.5, 1.5, 0.1)
@@ -130,10 +181,10 @@ with col_left:
     )
     st.checkbox(
         "OCR sonrası sözleşme tipini otomatik seç (devlet katkılı / katkısız)",
-        value=False,
+        value=True,
         key="ocr_auto_cikis_tipi",
-        help="Varsayılan kapalı: radyo sizin seçiminizde kalır. Açıkken yalnızca OCR satırı «devlet katkısı» "
-        "ile **başlıyorsa** (kısa başlık satırı) katkılı seçilir; aksi halde katkısız.",
+        help="Varsayılan açık: OCR'da «Devlet Katkısı» kalemi tutarıyla birlikte bulunursa "
+        "**devlet katkılı**, yoksa **devlet katkısız** seçilir. Kapatırsan radyo sizde kalır.",
     )
 
 with col_right:
@@ -149,11 +200,22 @@ with col_right:
         if len(files) > 4:
             st.caption(f"… ve {len(files) - 4} görüntü daha (hepsi OCR’da işlenir)")
 
-run = st.button("OCR çalıştır", type="primary", disabled=len(files) == 0)
-if run and files:
+run = st.button(
+    "OCR çalıştır",
+    type="primary",
+    disabled=len(files) == 0,
+    help="Tek dosya yüklediğinde OCR otomatik çalışır; çoklu dosya seçtiyseniz buradan tetikleyin.",
+)
+if (run or _auto_run) and files:
     apply_mode = "Üzerine yaz" if merge_mode == "Üzerine yaz" else "Yalnızca boş"
     agg_lines: list[str] = []
+    agg_boxes: list = []  # (bbox, text, conf) — bbox-aware parse için
     chunk_logs: list[dict] = []
+    # Çoklu görüntüde her dosyanın bbox Y koordinatlarını üst üste bindirmemek için
+    # offset uygula — sanki tüm görüntüler tek uzun resme yapıştırılmış gibi davranır.
+    # PAD: dosyalar arasında değer-etiket çağrışımını önlemek için bolca boşluk.
+    Y_PAD_BETWEEN_FILES = 2000
+    y_offset = 0
     for f in files:
         f.seek(0)
         image = Image.open(f)
@@ -162,7 +224,25 @@ if run and files:
         ordered = sorted_lines(results)
         lines = [t for _, t, _ in ordered]
         agg_lines.extend(lines)
-        part = extract_from_ocr_lines(lines)
+
+        if y_offset > 0:
+            shifted = []
+            for bbox, text, conf in ordered:
+                new_bbox = [[float(p[0]), float(p[1]) + y_offset] for p in bbox]
+                shifted.append((new_bbox, text, conf))
+            agg_boxes.extend(shifted)
+        else:
+            agg_boxes.extend(ordered)
+
+        # Bu görüntüdeki en alt Y'yi bul, sıradaki dosya için offset güncelle
+        max_y_this = 0.0
+        for bbox, _, _ in ordered:
+            for p in bbox:
+                if p[1] > max_y_this:
+                    max_y_this = float(p[1])
+        y_offset += max_y_this + Y_PAD_BETWEEN_FILES
+
+        part = extract_from_ocr_boxes(ordered)
         chunk_logs.append(
             {
                 "dosya": f.name,
@@ -170,12 +250,76 @@ if run and files:
                 "eslesmeler": list(part.debug_matches),
             }
         )
-    merged_extract = extract_from_ocr_lines(agg_lines)
-    _apply_extraction_to_widgets(merged_extract.to_dict(), apply_mode)
+    # Tüm dosyaları tek bbox listesi gibi parse et (Y-offset sayesinde ayrı bölgeler)
+    merged_extract = extract_from_ocr_boxes(agg_boxes)
+    extracted_dict = merged_extract.to_dict()
+
+    # Birikim auto-derive: OCR'da birikim alanı bulunamadı ama Ödenen + Yatırım
+    # Getirisi varsa, "Birikim = Ödenen + Getiri" kimliğinden türet ve widget'a yaz
+    # (kullanıcı kutuda görmek istiyor). Override etmek isterse üstüne yazabilir.
+    if (
+        extracted_dict.get("birikiminiz") is None
+        and extracted_dict.get("odenen_toplam_tutar") is not None
+        and extracted_dict.get("yatirim_getiriniz") is not None
+    ):
+        extracted_dict["birikiminiz"] = (
+            extracted_dict["odenen_toplam_tutar"]
+            + extracted_dict["yatirim_getiriniz"]
+        )
+        st.session_state["_birikim_ocr_turetildi"] = True
+    else:
+        st.session_state.pop("_birikim_ocr_turetildi", None)
+
+    # Süre OCR'da yoksa ama gauge altındaki «YYYY GİRİŞ» tespit edildiyse:
+    # (current_year - giris_yili - 1) yıl tahmini yap. Sebebi: ay/gün bilinmediği için
+    # calendar yıl farkı OVERSHOOT eder (ör. giriş Haziran 2023, bugün Mayıs 2026 →
+    # gerçek 2 yıl 11 ay = 2 yıl, ama 2026−2023=3). Bir yıl conservative tıraşlama
+    # undershoot'a dönüştürür → kademede %15 yerine %0 görünmesi kullanıcının
+    # gözünden kaçmaz, elle düzeltir; sessiz overshoot ise hesaba sızabilir.
+    if (
+        extracted_dict.get("hak_edise_esas_sure") is None
+        and merged_extract.giris_yili is not None
+    ):
+        gy = merged_extract.giris_yili
+        cy = datetime.now().year
+        sure_tahmin = max(0, cy - gy - 1)
+        extracted_dict["hak_edise_esas_sure"] = float(sure_tahmin)
+        st.session_state["_sure_giris_yili_turetildi"] = (gy, cy, sure_tahmin)
+    else:
+        st.session_state.pop("_sure_giris_yili_turetildi", None)
+
+    # Devlet katkılı sözleşmede (devlet_katkisi OCR'dan geldiyse) hak ediş oran ve
+    # tutarını süreden türet — EGM kademeleri (3y/6y/10y → %15/%35/%60).
+    sure_x = extracted_dict.get("hak_edise_esas_sure")
+    dk_x = extracted_dict.get("devlet_katkisi")
+    if dk_x is not None and sure_x is not None:
+        if extracted_dict.get("hak_edis_oraniniz") is None:
+            extracted_dict["hak_edis_oraniniz"] = hak_edis_orani_from_sure(sure_x)
+            st.session_state["_oran_ocr_turetildi"] = True
+        else:
+            st.session_state.pop("_oran_ocr_turetildi", None)
+        if extracted_dict.get("hak_edis_tutariniz") is None:
+            oran_x = extracted_dict["hak_edis_oraniniz"]
+            extracted_dict["hak_edis_tutariniz"] = hak_edis_tutari_from_oran(dk_x, oran_x)
+            st.session_state["_he_ocr_turetildi"] = True
+        else:
+            st.session_state.pop("_he_ocr_turetildi", None)
+    else:
+        st.session_state.pop("_oran_ocr_turetildi", None)
+        st.session_state.pop("_he_ocr_turetildi", None)
+
+    _apply_extraction_to_widgets(extracted_dict, apply_mode)
 
     if st.session_state.get("ocr_auto_cikis_tipi"):
+        # En güvenilir sinyal: parser «Devlet Katkısı» kalemini tutarıyla bulduysa
+        # (sıkı exclude listesi var, yatırılan/getirisi karışmaz). Bulamadıysa line-based
+        # başlık taraması yedek.
+        is_katkili = (
+            merged_extract.devlet_katkisi is not None
+            and merged_extract.devlet_katkisi > 0
+        ) or infer_devlet_katkili_sozlesme(agg_lines)
         st.session_state["cikis_sozlesme_tipi"] = (
-            "devlet_katkili" if infer_devlet_katkili_sozlesme(agg_lines) else "devlet_katkisiz"
+            "devlet_katkili" if is_katkili else "devlet_katkisiz"
         )
 
     if merge_mode == "Üzerine yaz":
@@ -218,6 +362,9 @@ if run and files:
     st.session_state.ocr_chunks.extend(chunk_logs)
     st.session_state.last_ocr_birlesik = "\n".join(agg_lines)
     st.session_state.last_ocr_eslesme = list(merged_extract.debug_matches)
+    # Aynı dosya için OCR'ın tekrar tetiklenmemesi için sig'i kaydet
+    if _current_file_sig is not None:
+        st.session_state["_last_ocr_file_sig"] = _current_file_sig
 
 st.subheader("Alanlar (OCR veya elle)")
 st.caption("Türk formatı: 1.234,56 — alanları istediğiniz gibi düzenleyebilirsiniz.")
@@ -333,6 +480,19 @@ sy = _read_scalar("hak_edise_esas_sure")
 odenen = _read_tl("odenen_toplam_tutar")
 oran_goster = (st.session_state.get(_widget_key("hak_edis_oraniniz")) or "").strip()
 
+# «Birikim = Ödenen Toplam Tutar + Yatırım Getirisi» BES'in temel kimliğidir
+# (devlet katkısı varsa ayrı kalemdir, birikim'e dahil değildir). Bazı şirket
+# ekranlarında (Garanti detay sayfası gibi) birikim alanı doğrudan görünmez ama
+# ödenen + getiri görünür → türetiyoruz.
+#   * OCR sırasında türetildiyse Birikim widget'ı zaten doldurulmuş olur (bkz: yukarısı).
+#   * Kullanıcı sadece manuel ödenen+getiri girdiyse burada türetiriz (widget boş kalır
+#     ama hesap için yine doğru değer kullanılır).
+b_turetildi_manuel = False
+if b is None and odenen is not None and yg is not None:
+    b = odenen + yg
+    b_turetildi_manuel = True
+b_turetildi = b_turetildi_manuel or st.session_state.get("_birikim_ocr_turetildi", False)
+
 devlet_katkili = sozlesme_cikis == "devlet_katkili"
 if devlet_katkili:
     gerekli = {
@@ -359,7 +519,37 @@ hesap_hazir = (
 if eksik:
     st.warning("Hesap için şu alanlar dolu olmalı: " + ", ".join(eksik))
 elif hesap_hazir:
-    he_kullan = he if he is not None else 0.0
+    he_kullan = he if he is not None else 0.0  # info notlarında da kullanılıyor — önce tanımla
+    if b_turetildi:
+        st.info(
+            f"**Birikim otomatik türetildi:** Ödenen ({format_tl(odenen)}) + "
+            f"Yatırım Getirisi ({format_tl(yg)}) = **{format_tl(b)} TL**. "
+            "Birikim alanı boştu; üst kutuya elle bir değer yazarsanız o değer kullanılır."
+        )
+    sure_info = st.session_state.get("_sure_giris_yili_turetildi")
+    if sure_info:
+        gy, cy, st_ = sure_info
+        st.info(
+            f"**Süre tahmin edildi:** Gauge'taki giriş yılı **{gy}**, bugün **{cy}** → "
+            f"conservative tahmin **{st_} yıl** (calendar farkı {cy - gy} − 1 = {st_}, "
+            "ay/gün bilinmediği için 1 yıl tıraş). "
+            "Gerçek süren {min}–{max} yıl arasıdır; kademe sınırlarına ({line}) "
+            "denk düşüyorsa **alanı elle düzeltin** — örn. tam 3 yıl doldurduysan kutuya 3 yaz.".format(
+                min=st_, max=st_ + 1, line="%0/%15/%35/%60"
+            )
+        )
+    if st.session_state.get("_oran_ocr_turetildi"):
+        st.info(
+            "**Hak ediş oranı otomatik türetildi:** EGM kademeli oranı "
+            "(< 3 yıl %0, 3–6 yıl %15, 6–10 yıl %35, ≥ 10 yıl %60). "
+            f"Süre **{sy:g} yıl** → **%{int(hak_edis_orani_from_sure(sy))}**. "
+            "Yaş şartı dikkate alınmaz; kutuya elle yazarsanız o kullanılır."
+        )
+    if st.session_state.get("_he_ocr_turetildi") and dk is not None and dk > 0:
+        st.info(
+            f"**Hak ediş tutarı otomatik türetildi:** Devlet katkısı ({format_tl(dk)}) × "
+            f"oran ({(he_kullan / dk * 100):.0f}%) = **{format_tl(he_kullan)} TL**."
+        )
     h = cikista_ele_gecen_tl(
         b,
         he_kullan,
