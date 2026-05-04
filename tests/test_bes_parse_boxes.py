@@ -181,6 +181,26 @@ def test_bes_giris_tarihi_inline_etiket_kutusu_icinde() -> None:
     assert out.bes_giris_tarihi == date(2009, 1, 25)
 
 
+def test_otomatik_bes_giris_tarihi_iki_kutu_split_tarih_ust_satirda() -> None:
+    """Garanti Otomatik BES'te etiket 2 satıra bölünür (OCR 2 ayrı kutu) ve tarih ÜST
+    satırla hizalı olur — eşleşen "Giriş Tarihi" kutusunun ÜSTÜNDE/SAĞINDA durur.
+    Önceki "right of label, vertically near" toleransı bunu yakalamalı."""
+    from datetime import date
+
+    raw = [
+        # Etiket 2 satıra bölünmüş — gerçekçi y mesafesi (üst üste değil)
+        _box(20, 70, 200, 50, "Otomatik BES"),       # y 70-120
+        _box(20, 130, 180, 45, "Giriş Tarihi"),       # y 130-175 (eşleşen label)
+        # Tarih üst label satırıyla hizalı — eşleşen "Giriş Tarihi"nin ÜSTÜNDE
+        _box(800, 70, 180, 60, "03/02/2020"),         # y 70-130
+        # Aşağıda Emeklilik Tarihiniz + 04/08/2041 — karışmamalı
+        _box(20, 250, 220, 50, "Emeklilik Tarihiniz"),
+        _box(800, 250, 180, 50, "04/08/2041"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.bes_giris_tarihi == date(2020, 2, 3)
+
+
 def test_bes_giris_tarihi_yoksa_none() -> None:
     """Etiket yoksa veya tarih yoksa None döner — krasher değil."""
     raw = [

@@ -1071,8 +1071,14 @@ def _pick_value(
 
 
 _BES_GIRIS_PHRASES: tuple[str, ...] = (
+    # Spesifik öncelikli (uzun phrase _find_label_box'ta tercih edilir).
     "bes giriş tarihi",
     "bes giris tarihi",
+    # Garanti "Otomatik BES" varyantında etiket iki satıra bölünür ("Otomatik BES" +
+    # "Giriş Tarihi" iki ayrı OCR kutusu) → tek başına "BES" içeren phrase yetmez.
+    # "giriş tarihi" daha gevşek; "Emeklilik Tarihiniz" içermez (güvenli).
+    "giriş tarihi",
+    "giris tarihi",
     "bes giriş",
     "bes giris",
 )
@@ -1118,19 +1124,24 @@ def _detect_bes_giris_tarihi(boxes: list[_BBox]) -> date | None:
         if d_obj is None:
             continue
         y_ov = _vertical_overlap(label, b)
-        same_row = (
-            y_ov >= 0.5 * min(h, b.h)
-            and b.x_min >= label.x_max - 0.1 * w
-        )
-        if same_row:
+        x_ov = _horizontal_overlap(label, b)
+        right_of_label = b.x_min >= label.x_max - 0.1 * w
+        # 1) Aynı satır sağda — en güçlü sinyal
+        if y_ov >= 0.5 * min(h, b.h) and right_of_label:
             score = (0, max(0.0, b.x_min - label.x_max))
+        # 2) Sağda ama dikey biraz kaymış — "Otomatik BES / Giriş Tarihi" gibi 2 satıra
+        # bölünmüş etiketler. Tarih genelde ilk satıra hizalı, eşleşen label kutusu (alt
+        # satır) ile aynı row'da olmaz. ±2 label height tolerans yeterli; "Emeklilik
+        # Tarihiniz" 3-4h aşağıda olduğu için karışmaz.
+        elif right_of_label and abs(b.y_cen - label.y_cen) <= 2.0 * h:
+            score = (1, abs(b.y_cen - label.y_cen))
+        # 3) Altında aynı sütun
         else:
             below = b.y_min >= label.y_cen
-            x_ov = _horizontal_overlap(label, b)
             x_aligned = x_ov > 0 or abs(b.x_cen - label.x_cen) < max(w, b.w) * 0.7
             if not (below and x_aligned):
                 continue
-            score = (1, b.y_min - label.y_max)
+            score = (2, b.y_min - label.y_max)
         if best_score is None or score < best_score:
             best_score = score
             best_date = d_obj
