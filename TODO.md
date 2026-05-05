@@ -4,7 +4,38 @@ Cowork modunda yapılanların ardından kalanlar. Öncelik sırasıyla:
 
 ## Yüksek öncelik
 
-### 1. Gauge needle / cyan-fill ile süre tespiti (görüntü analizi)
+### 1. ⚠️ "BES Giriş Tarihi" yerine sözleşme başlangıç tarihi (DOĞRULUK BUG'I)
+Mevcut parser Garanti mobil ekranındaki **"BES Giriş Tarihi"** alanını süre
+kaynağı olarak kullanıyor — ama bu alan **BES sistemine ilk giriş tarihi**dir,
+**sözleşme başlangıç tarihi** değildir. Stopaj kademe (%5/%10/%15) ve hak ediş
+kademe (%0/%15/%35/%60) **sözleşme bazlı** hesaplanır → yanlış değer kullanmak
+hesabı bozar.
+
+**Örnek:** Kullanıcı 2009'da BES'e ilk girmiş ama 2026'da yeni bir sözleşme
+açıp 2027'de çıkıyor. Doğru süre 1 yıl (sözleşmenin ömrü), bizim parser 17 yıl
+(sistem giriş) der → stopaj %15 yerine %10, hak ediş %0 yerine %60 hesaplanır.
+Devlet katkısının tamamı kayıp olması gerekirken hak edilmiş gibi görünür.
+
+**Yapılacak:**
+1. Garanti'nin diğer ekranlarında **sözleşme başlangıç tarihi** nerede gösteriliyor
+   araştır (kullanıcı keşfedecek). Bilinen muhtemel ekranlar: "Sözleşme Detayı",
+   "Plan Detayı", PDF olarak indirilebilen sözleşme özeti.
+2. Parser'a `sozlesme_baslangic_tarihi` alanı ekle (yeni phrase: muhtemelen
+   "sözleşme başlangıç tarihi", "sözleşme tarihi", "başlangıç tarihi" varyantları).
+3. `BesExtracted.sozlesme_baslangic_tarihi` alanı (`bes_giris_tarihi`'na ek).
+4. Auto-derive zinciri sırası:
+   - `sozlesme_baslangic_tarihi` varsa: bunu kullan (en kesin)
+   - `bes_giris_tarihi` varsa: kullan AMA UI'a uyarı: "Bu tarih BES sistem giriş
+     tarihinizdir; eğer sonradan **yeni sözleşme** açtıysanız sözleşme başlangıç
+     tarihini elle girin"
+   - `giris_yili` (gauge) varsa: conservative tahmin (eski mantık)
+5. `tests/test_bes_parse_boxes.py`'a regression: hem yeni alan parse, hem öncelik
+   sırası.
+
+**Not:** Bu, deployment'ı kullanan herkes için potansiyel yanlış hesaplama riski
+demektir. Acil değil ama yüksek öncelik — kullanıcı araştırması bitince ele alalım.
+
+### 2. Gauge needle / cyan-fill ile süre tespiti (görüntü analizi)
 Bazı mobil layout'larda gauge altındaki "YYYY GİRİŞ" yazısı sığmıyor → bizim
 mevcut süre auto-derive zinciri (CLAUDE.md #2) çalışmıyor → kullanıcı süreyi
 elle girmek zorunda. Manuel akış artık çalışıyor (app.py'a hak ediş tutar/oran
@@ -20,13 +51,13 @@ Yeni modül `src/gauge_detect.py`. Auto-derive zincirine #2'den önce eklenir.
 Sentetik test fixture (3 kademe için PNG simülasyonu) + e2e regression. Tahmini
 1-2 saat. Alternatif (needle açısı) daha hassas ama daha gürültülü, kademe yeterli.
 
-### 2. Web deployment ✅ TAMAMLANDI
+### 3. Web deployment ✅ TAMAMLANDI
 HF Spaces + Docker SDK ile deploy edildi. Parola gate (APP_PASSWORD secret).
 URL: huggingface.co/spaces/Selimakd/bes-cikis. CPU Basic free tier yeterli.
 
 ## Orta öncelik
 
-### 3. Diğer şirket varyasyonları
+### 4. Diğer şirket varyasyonları
 Şu an Garanti web + mobil + 2 katkılı senaryo destekli. Test edilmemiş:
 Anadolu Hayat, Allianz, Ziraat, AvivaSA, Aegon, vb. Her şirketin etiket
 sözcüğü + layout farklı; `FIELD_PHRASES`'e yeni sinonimler + bbox toleransı.
@@ -38,32 +69,30 @@ Yeni şirket eklemek için akış:
 4. Test geçince `tests/fixtures/screenshots/senaryo_<sirket>_*/` altına PNG + `beklenen.json`
 5. Regression olarak `test_bes_parse_boxes.py`'a unit test ekle
 
-### 4. Çıkış ledger / hesap geçmişi
+### 5. Çıkış ledger / hesap geçmişi
 Streamlit session_state geçici. Kullanıcı farklı sözleşmeleri / tarihleri
 karşılaştırmak isteyebilir. Local SQLite'a geçmiş kaydı (kullanıcı opt-in).
 
-### 5. PDF rapor üretimi
+### 6. PDF rapor üretimi
 "Çıkış sonucunu PDF olarak kaydet" — kullanıcı muhasebeci / eşine paylaşmak
 isteyebilir. ReportLab veya weasyprint.
 
-### 6. Sözleşme başlangıç tarihi tam parse (gün/ay/yıl) ✅ TAMAMLANDI
-Garanti mobil kompakt ekranında "BES Giriş Tarihi: 25/01/2009" tek satırda
-görünüyor → tek screenshot ile çıkarılabiliyor. `bes_parse.py`'a
-`_detect_bes_giris_tarihi(boxes)` eklendi (DD/MM/YYYY pattern, bbox-aware).
-`BesExtracted.bes_giris_tarihi` alanı, app.py auto-derive zincirinde
-gauge'taki giris_yili'na **tercih edilir** — `floor((bugün − tarih) / 365.25)`
-ile ay/gün dahil kesin yıl.
+### 7. Sözleşme başlangıç tarihi DD/MM/YYYY parse altyapısı ✅ TAMAMLANDI
+Tarih regex + bbox-aware spatial detection eklendi. `_detect_bes_giris_tarihi`
+`BesExtracted.bes_giris_tarihi` üretiyor. NOT: Şu an "BES Giriş Tarihi" alanını
+parse ediyor — bunun sözleşme başlangıç tarihinin doğru kaynağı olmadığı #1'de
+açıklandı; altyapı hazır, doğru kaynağa geçişe hazır.
 
 ## Düşük öncelik / temizlik
 
-### 7. ORAN_PATTERN_NUM_FIRST regex küçük bug
+### 8. ORAN_PATTERN_NUM_FIRST regex küçük bug
 `(\d{1,3}(?:,\d{1,4})?|\d+(?:\.\d+)?)\s*%` — alternation sırası kötü. Bkz REVIEW.md.
 
-### 8. Auto-detect "Yatırılan + Getirisi = Devlet Katkısı" identity check
+### 9. Auto-detect "Yatırılan + Getirisi = Devlet Katkısı" identity check
 Her devlet katkılı ekranda parser bu identity'yi cross-check edip mismatch'te uyarı verebilir
 (OCR yanlışlığı tespiti).
 
-### 9. Çoklu sözleşme desteği
+### 10. Çoklu sözleşme desteği
 Bir kullanıcının birden fazla BES sözleşmesi olabilir. Şu an tek sözleşme bazlı UI;
 çoklu sözleşmeyi tab'lara ayırma fikri.
 
