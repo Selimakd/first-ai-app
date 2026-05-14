@@ -1,0 +1,15 @@
+{
+  "aciklama": "Garanti teklif/sözleşme detayı — sözleşme başlangıç tarihi açık (Yürürlük / Hakediş Baz), farklı etiket sözcükleri, açık %0 hak ediş",
+  "upscale": 1.5,
+  "sozlesme_tipi": "devlet_katkili",
+
+  "_not": "yatirim_getiriniz parser çıktısında YOK — bu ekranda 'Yatırım Getiriniz' ayrı kalem değil. App.py auto-derive Birikim − Tahsilat ile türetir. hak_edise_esas_sure de parser çıktısında yok (yıl metni geçmiyor); app.py sozlesme_baslangic_tarihi'nden floor((bugün − tarih)/365.25) ile türetir → bugünün tarihine bağımlı, bu fixture'da assert edilmiyor. Aynı sebeple beklenen_hesap yok.",
+
+  "beklenen_alanlar": {
+    "odenen_toplam_tutar":  1690.00,
+    "birikiminiz":          2635.47,
+    "devlet_katkisi":       699.18,
+    "hak_edis_oraniniz":    0,
+    "hak_edis_tutariniz":   0
+  }
+}

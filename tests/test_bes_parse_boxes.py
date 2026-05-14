@@ -615,3 +615,179 @@ def test_bbox_sira_karistigi_durumda_dogru_eslesir() -> None:
     out = extract_from_ocr_boxes(raw)
     assert out.odenen_toplam_tutar == 50_000.00
     assert out.yatirim_getiriniz == 12_500.00
+
+
+# ---------------------------------------------------------------------------
+# Senaryo J: Garanti teklif/sözleşme detayı ekranı
+#   - Farklı etiket sözcükleri: "Tahsilat Tutarı", "Birikim Tutarı (Devlet Katkısı
+#     Hariç)", "Devlet Katkısı Birikimi", "Hak Edilen Devlet Katkısı Oranı/Tutarı"
+#   - Çok satıra bölünmüş etiketler (OCR 2 ayrı kutu) → _find_label_box join
+#   - Sözleşme başlangıç tarihi: "Yürürlük Tarihi" / "Devlet Katkısı Hakediş Baz Tarihi"
+#   - Açık sıfır değerler: "%0.00", "0,00 TL"
+# ---------------------------------------------------------------------------
+
+
+def test_tahsilat_tutari_odenen_olarak_yakalanir() -> None:
+    """"Tahsilat Tutarı (Devlet Katkısı Hariç)" → odenen_toplam_tutar."""
+    raw = [
+        _box(20, 100, 380, 40, "Tahsilat Tutarı (Devlet"),
+        _box(20, 144, 300, 40, "Katkısı Hariç)"),
+        _box(650, 110, 280, 44, "1.690,00 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.odenen_toplam_tutar == 1_690.00
+
+
+def test_birikim_tutari_birikiminiz_olarak_yakalanir() -> None:
+    """"Birikim Tutarı (Devlet Katkısı Hariç)" → birikiminiz.
+    "devlet katkisi birikim" exclude'u bunu ELEMEMELI (folded metinde o alt dizi yok)."""
+    raw = [
+        _box(20, 100, 380, 40, "Birikim Tutarı (Devlet"),
+        _box(20, 144, 300, 40, "Katkısı Hariç)"),
+        _box(650, 110, 280, 44, "2.635,47 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.birikiminiz == 2_635.47
+
+
+def test_devlet_katkisi_birikimi_total_olarak_yakalanir() -> None:
+    """"Devlet Katkısı Birikimi" (toplam) → devlet_katkisi; "Devlet Katkısı Tutarı"
+    (yatırılan) bu alana atanmamalı (uzun phrase önceliği)."""
+    raw = [
+        _box(20, 100, 360, 40, "Devlet Katkısı Tutarı"),
+        _box(650, 100, 260, 40, "502,00 TL"),
+        _box(20, 220, 380, 40, "Devlet Katkısı Birikimi*"),
+        _box(650, 220, 260, 40, "699,18 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.devlet_katkisi == 699.18
+
+
+def test_hak_edilen_devlet_katkisi_orani_sifir_bolunmus_etiket() -> None:
+    """"Hak Edilen Devlet" + "Katkısı Oranı*" 2 ayrı kutu → join ile eşleşir;
+    "%0.00" → 0.0 (parse_oran sıfırı açık % kalıbıyla kabul eder)."""
+    raw = [
+        _box(20, 100, 340, 40, "Hak Edilen Devlet"),
+        _box(20, 148, 300, 40, "Katkısı Oranı*"),
+        _box(650, 120, 200, 44, "%0.00"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.hak_edis_oraniniz == 0.0
+
+
+def test_hak_edilen_devlet_katkisi_tutari_sifir_bolunmus_etiket() -> None:
+    """"Hak Edilen Devlet" + "Katkısı Tutarı**" 2 ayrı kutu → join ile eşleşir;
+    "0,00 TL" → 0.0 (parse_money açık TL suffix'li sıfırı kabul eder)."""
+    raw = [
+        _box(20, 100, 340, 40, "Hak Edilen Devlet"),
+        _box(20, 148, 320, 40, "Katkısı Tutarı**"),
+        _box(650, 120, 200, 44, "0,00 TL"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.hak_edis_tutariniz == 0.0
+
+
+def test_sozlesme_baslangic_yururluk_tarihi() -> None:
+    """"Yürürlük Tarihi" → sozlesme_baslangic_tarihi."""
+    from datetime import date
+
+    raw = [
+        _box(20, 100, 280, 40, "Yürürlük Tarihi"),
+        _box(650, 100, 240, 40, "15/12/2023"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.sozlesme_baslangic_tarihi == date(2023, 12, 15)
+
+
+def test_sozlesme_baslangic_hakedis_baz_tarihi_bolunmus() -> None:
+    """"Devlet Katkısı Hakediş" + "Baz Tarihi" 2 kutu → join → sozlesme_baslangic_tarihi.
+    Yürürlük Tarihi yoksa Hakediş Baz Tarihi yedek kaynaktır."""
+    from datetime import date
+
+    raw = [
+        _box(20, 100, 380, 40, "Devlet Katkısı Hakediş"),
+        _box(20, 148, 240, 40, "Baz Tarihi"),
+        _box(650, 120, 240, 44, "15/12/2023"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.sozlesme_baslangic_tarihi == date(2023, 12, 15)
+
+
+def test_sozlesme_baslangic_yururluk_hakedis_baza_tercih_edilir() -> None:
+    """Hem Yürürlük hem Hakediş Baz varsa Yürürlük öncelikli (ikisi de aynı tarih
+    olsa bile öncelik sırası deterministik kalmalı)."""
+    from datetime import date
+
+    raw = [
+        _box(20, 100, 280, 40, "Yürürlük Tarihi"),
+        _box(650, 100, 240, 40, "15/12/2023"),
+        _box(20, 250, 380, 40, "Devlet Katkısı Hakediş"),
+        _box(20, 298, 240, 40, "Baz Tarihi"),
+        _box(650, 270, 240, 44, "15/12/2023"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.sozlesme_baslangic_tarihi == date(2023, 12, 15)
+
+
+def test_garanti_teklif_detay_full_screen() -> None:
+    """Tam Garanti teklif/sözleşme detayı ekranı — gerçek screenshot değerleriyle.
+
+    Beklenen: parser money alanlarını + sözleşme başlangıç tarihini doğru çıkarır.
+    yatirim_getiriniz bu ekranda YOK (app.py auto-derive Birikim − Tahsilat ile türetir).
+    """
+    from datetime import date
+
+    raw = [
+        # Müşteri No — gürültü (para da tarih de değil)
+        _box(20, 100, 380, 40, "Garanti BBVA Emeklilik"),
+        _box(20, 144, 320, 40, "Müşteri Numarası"),
+        _box(650, 110, 240, 44, "6551957"),
+        # Teklif Başlangıç Tarihi
+        _box(20, 260, 380, 44, "Teklif Başlangıç Tarihi"),
+        _box(650, 260, 240, 44, "15/12/2023"),
+        # Yürürlük Tarihi
+        _box(20, 380, 280, 44, "Yürürlük Tarihi"),
+        _box(650, 380, 240, 44, "15/12/2023"),
+        # Katkı Payı — gürültü ("50,00 TL" tutarı hiçbir alana atanmamalı)
+        _box(20, 500, 220, 44, "Katkı Payı"),
+        _box(650, 500, 300, 44, "AYLIK / 50,00 TL"),
+        # Tahsilat Tutarı (2 satır) → odenen
+        _box(20, 620, 380, 40, "Tahsilat Tutarı (Devlet"),
+        _box(20, 664, 300, 40, "Katkısı Hariç)"),
+        _box(650, 632, 260, 44, "1.690,00 TL"),
+        # Devlet Katkısı Tutarı (yatırılan — devlet_katkisi'ne ATANMAMALI)
+        _box(20, 780, 360, 44, "Devlet Katkısı Tutarı"),
+        _box(650, 780, 260, 44, "502,00 TL"),
+        # Birikim Tutarı (2 satır) → birikiminiz
+        _box(20, 900, 380, 40, "Birikim Tutarı (Devlet"),
+        _box(20, 944, 300, 40, "Katkısı Hariç)"),
+        _box(650, 912, 260, 44, "2.635,47 TL"),
+        # Devlet Katkısı Birikimi → devlet_katkisi (toplam)
+        _box(20, 1060, 380, 44, "Devlet Katkısı Birikimi*"),
+        _box(650, 1060, 260, 44, "699,18 TL"),
+        # Toplam Birikim (2 satır) — grand total, hiçbir alana atanmamalı
+        _box(20, 1180, 380, 40, "Toplam Birikim (Devlet"),
+        _box(20, 1224, 300, 40, "Katkısı Dahil)"),
+        _box(650, 1192, 260, 44, "3.334,65 TL"),
+        # Hak Edilen Devlet Katkısı Oranı (2 satır) → hak_edis_oraniniz = 0
+        _box(20, 1340, 340, 40, "Hak Edilen Devlet"),
+        _box(20, 1384, 300, 40, "Katkısı Oranı*"),
+        _box(650, 1352, 200, 44, "%0.00"),
+        # Hak Edilen Devlet Katkısı Tutarı (2 satır) → hak_edis_tutariniz = 0
+        _box(20, 1500, 340, 40, "Hak Edilen Devlet"),
+        _box(20, 1544, 320, 40, "Katkısı Tutarı**"),
+        _box(650, 1512, 200, 44, "0,00 TL"),
+        # Devlet Katkısı Hakediş Baz Tarihi (2 satır)
+        _box(20, 1660, 380, 40, "Devlet Katkısı Hakediş"),
+        _box(20, 1704, 240, 40, "Baz Tarihi"),
+        _box(650, 1672, 240, 44, "15/12/2023"),
+    ]
+    out = extract_from_ocr_boxes(raw)
+    assert out.odenen_toplam_tutar == 1_690.00
+    assert out.birikiminiz == 2_635.47
+    assert out.devlet_katkisi == 699.18  # "Devlet Katkısı Birikimi" toplam, 502 (yatırılan) değil
+    assert out.hak_edis_oraniniz == 0.0
+    assert out.hak_edis_tutariniz == 0.0
+    assert out.sozlesme_baslangic_tarihi == date(2023, 12, 15)
+    # Yatırım getirisi bu ekranda yok — parser türetmiyor (app.py auto-derive işi)
+    assert out.yatirim_getiriniz is None

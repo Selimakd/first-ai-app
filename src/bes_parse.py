@@ -29,6 +29,8 @@ FIELD_PHRASES: dict[str, tuple[str, ...]] = {
         "odenen toplam",
         "ödenen tutar",  # Garanti mobil
         "odenen tutar",
+        "tahsilat tutarı",  # Garanti teklif/sözleşme detayı — "Tahsilat Tutarı (Devlet Katkısı Hariç)"
+        "tahsilat tutari",
     ),
     "hak_edise_esas_sure": (
         "hak edişe esas süre",
@@ -37,12 +39,17 @@ FIELD_PHRASES: dict[str, tuple[str, ...]] = {
         "hak edise esas",
     ),
     "hak_edis_oraniniz": (
+        # En uzun/spesifik phrase'ler önce — _find_label_box uzun eşleşmeyi tercih eder.
+        "hak edilen devlet katkısı oranı",  # Garanti teklif/sözleşme detayı
+        "hak edilen devlet katkisi orani",
         "hak ediş oranınız",
         "hak edis oraniniz",
         "hak ediş oranı",
         "hak edis orani",
     ),
     "hak_edis_tutariniz": (
+        "hak edilen devlet katkısı tutarı",  # Garanti teklif/sözleşme detayı
+        "hak edilen devlet katkisi tutari",
         "hak ediş tutarınız",
         "hak edis tutariniz",
         "hak ediş tutarı",
@@ -59,10 +66,13 @@ FIELD_PHRASES: dict[str, tuple[str, ...]] = {
     ),
     "devlet_katkisi": (
         # Garanti mobil kompakt varyant: tek başlık altında yatırılan + getiri toplamı
-        # ("Devlet Katkısı Birikiminiz"). Eski varyantlarda "Devlet Katkısı" zaten toplam idi —
-        # uzun phrase _find_label_box'ta öncelikli olduğu için her iki varyantta da doğru kutu seçilir.
+        # ("Devlet Katkısı Birikiminiz" / "Devlet Katkısı Birikimi"). Eski varyantlarda
+        # "Devlet Katkısı" zaten toplam idi — uzun phrase _find_label_box'ta öncelikli
+        # olduğu için her iki varyantta da doğru kutu seçilir.
         "devlet katkısı birikiminiz",
         "devlet katkisi birikiminiz",
+        "devlet katkısı birikimi",  # Garanti teklif/sözleşme detayı
+        "devlet katkisi birikimi",
         "devlet katkısı birikim",
         "devlet katkisi birikim",
         "devlet katkısı",
@@ -70,6 +80,8 @@ FIELD_PHRASES: dict[str, tuple[str, ...]] = {
     ),
     "birikiminiz": (
         "toplam birikiminiz",  # bazı şirketler bu başlığı kullanır (devlet katkısız ekran)
+        "birikim tutarı",  # Garanti teklif/sözleşme detayı — "Birikim Tutarı (Devlet Katkısı Hariç)"
+        "birikim tutari",
         "birikiminiz",
         "birikimınız",
         "birikiminız",
@@ -533,9 +545,14 @@ class BesExtracted:
     # değil, ek metadata.
     giris_yili: int | None = None
     # BES Giriş Tarihi (DD/MM/YYYY) — Garanti mobil kompakt ekranı bunu açıkça
-    # gösterir. Varsa giris_yili'na göre TERCİH EDİLİR (ay/gün dahil daha kesin).
+    # gösterir. BES sistemine İLK giriş tarihidir; sözleşme başlangıcına eşit
+    # olmayabilir. App'te sozlesme_baslangic_tarihi yoksa yedek olarak kullanılır.
     # Yine to_dict()'te yok — metadata.
     bes_giris_tarihi: date | None = None
+    # Sözleşme başlangıç tarihi (Yürürlük / Hakediş Baz / Teklif Başlangıç) — stopaj
+    # ve hak ediş süresi için DOĞRU kaynak. Varsa bes_giris_tarihi ve giris_yili'na
+    # tercih edilir. Garanti teklif/sözleşme detayı ekranında görünür. Metadata.
+    sozlesme_baslangic_tarihi: date | None = None
     raw_lines: list[str] = field(default_factory=list)
     debug_matches: list[tuple[str, str, float | None]] = field(default_factory=list)
 
@@ -792,22 +809,25 @@ def match_field(norm_line: str) -> str | None:
 # Etiket eşlemesinde dışlanacak alt-dizgeler: aynı kelimeyi içerip BAŞKA alanı temsil
 # eden başlıklar bu listeyle elenir.
 #   - devlet_katkisi: "Yatırılan Devlet Katkısı" ve "Devlet Katkısı Getirisi" farklı
-#     kalemlerdir; "Devlet Katkısı" ana toplamla karışmamalı.
+#     kalemlerdir; "Devlet Katkısı" ana toplamla karışmamalı. Ayrıca "Hak Edilen Devlet
+#     Katkısı *" (hak ediş alanları) ve "Devlet Katkısı Hakediş Baz Tarihi" (tarih) de
+#     devlet_katkisi tutarı değildir.
 #   - birikiminiz:   "Toplam Birikiminiz" GERÇEK birikim olduğu için exclude DEĞİL —
-#     bazı şirketlerde tek başlık o şekilde geçer. Sadece "yatirilan" defansif kalıyor
-#     ("Yatırılan Birikiminiz" gibi varsayımsal yan başlıklar için).
+#     bazı şirketlerde tek başlık o şekilde geçer. "devlet katkisi birikim" exclude'u
+#     "Devlet Katkısı Birikimi/Birikiminiz" (devlet katkısı toplamı) kutusunu eler AMA
+#     "Birikim Tutarı (Devlet Katkısı Hariç)" (gerçek birikim) kutusunu elemmez —
+#     o folded metinde "devlet katkisi birikim" alt dizisi yoktur.
 _FIELD_LABEL_EXCLUDE: dict[str, tuple[str, ...]] = {
     "devlet_katkisi": (
         "yatirilan devlet katkisi",
         "yatirilan devlet katkisi getirisi",
         "devlet katkisi getirisi",
+        "hak edilen devlet katkisi",  # "Hak Edilen Devlet Katkısı Oranı/Tutarı" — hak ediş alanları
+        "devlet katkisi hakedis",     # "Devlet Katkısı Hakediş Baz Tarihi" — tarih
     ),
     "birikiminiz": (
         "yatirilan",
-        # "Devlet Katkısı Birikiminiz" devlet katkısı toplamıdır — kullanıcının birikimi değil.
-        # Uzun phrase önceliği zaten doğru kutuyu seçer ama defansif: birikiminiz alanı için
-        # bu kutuyu hiç değerlendirme.
-        "devlet katkisi",
+        "devlet katkisi birikim",
     ),
 }
 
@@ -884,6 +904,20 @@ def _box_is_any_label(box: _BBox) -> bool:
     return False
 
 
+def _union_bbox(a: _BBox, b: _BBox) -> _BBox:
+    """İki kutunun birleşik (union) bbox'ı — çok satıra bölünmüş etiketleri tek kutu gibi
+    temsil etmek için. text/folded boşlukla birleşir, geometri union'lanır."""
+    return _BBox(
+        text=a.text + " " + b.text,
+        folded=a.folded + " " + b.folded,
+        x_min=min(a.x_min, b.x_min),
+        x_max=max(a.x_max, b.x_max),
+        y_min=min(a.y_min, b.y_min),
+        y_max=max(a.y_max, b.y_max),
+        conf=min(a.conf, b.conf),
+    )
+
+
 def _find_label_box(
     boxes: list[_BBox],
     phrases: tuple[str, ...],
@@ -894,22 +928,61 @@ def _find_label_box(
     Tercih:
     1. En uzun eşleşen ifade (daha spesifik)
     2. Eşit uzunlukta → metin fazlalığı en az olan (daha «temiz etiket» görünen) kutu
+
+    Çok satıra bölünmüş etiketler (örn. "Hak Edilen Devlet" + "Katkısı Oranı*" iki ayrı
+    OCR kutusu) için dikey komşu 2–3 kutu birleştirilip union bbox olarak da denenir.
+    Dönen kutu union bbox olduğunda spatial value detection doğru y-aralığını görür.
     """
     ex_folded = tuple(fold_tr_ascii(x) for x in exclude_substrings)
     best: _BBox | None = None
     best_key: tuple[int, int] = (-1, 10**9)
-    for box in boxes:
-        if any(ex in box.folded for ex in ex_folded):
-            continue
+
+    def _consider(cand: _BBox) -> None:
+        nonlocal best, best_key
+        if any(ex in cand.folded for ex in ex_folded):
+            return
         for ph in phrases:
             fp = fold_tr_ascii(ph)
-            if fp not in box.folded:
+            if fp not in cand.folded:
                 continue
-            extra = len(box.folded) - len(fp)
+            extra = len(cand.folded) - len(fp)
             key = (len(fp), -extra)  # uzun ifade + az fazlalık
             if key > best_key:
                 best_key = key
-                best = box
+                best = cand
+
+    # 1) Tek kutu
+    for box in boxes:
+        _consider(box)
+
+    # 2) Dikey komşu birleşimler (base + en fazla 2 satır) — çok satıra bölünmüş
+    #    etiketler. Sıralı komşuya GÜVENMEYİZ: değer kutuları (sağ sütun) OCR
+    #    sıralamasında etiket satırlarının arasına girer. Her kutu için "hemen altında
+    #    + x-örtüşen + en yakın" kutuyu zincirleyerek bul.
+    for base in boxes:
+        acc = base
+        joined_ids = {id(base)}
+        for _ in range(2):
+            nxt: _BBox | None = None
+            nxt_gap = 1e18
+            for nb in boxes:
+                if id(nb) in joined_ids:
+                    continue
+                x_ov = max(0.0, min(acc.x_max, nb.x_max) - max(acc.x_min, nb.x_min))
+                if x_ov <= 0:
+                    continue
+                y_gap = nb.y_min - acc.y_max
+                if y_gap < -0.3 * max(acc.h, 1.0) or y_gap > 1.5 * max(acc.h, nb.h, 1.0):
+                    continue
+                if y_gap < nxt_gap:
+                    nxt = nb
+                    nxt_gap = y_gap
+            if nxt is None:
+                break
+            acc = _union_bbox(acc, nxt)
+            joined_ids.add(id(nxt))
+            _consider(acc)
+
     return best
 
 
@@ -944,11 +1017,14 @@ def _parse_money(text: str) -> float | None:
     v = first_amount_in_text(text)
     if v is None:
         return None
-    if v < 1:
-        return None
     # Düz rakam dizileri («Sözleşme No: 15485747» gibi) para sayılmaz — gerçek bir
     # BES tutarı her zaman TL suffix'i veya Türkçe ondalık/binlik formatı taşır.
     if not _looks_like_currency(text):
+        return None
+    # v < 1 genelde OCR gürültüsü; AMA açık TL/₺/TRY suffix'li "0,00 TL" geçerli bir
+    # tutardır (yeni sözleşmede "Hak Edilen Devlet Katkısı Tutarı: 0,00 TL"). Suffix
+    # yoksa küçük değer ele.
+    if v < 1 and not _CURRENCY_SUFFIX_RE.search(text):
         return None
     return v
 
@@ -977,8 +1053,13 @@ def _parse_oran(text: str) -> float | None:
     v = parse_oran_from_text(text)
     if v is not None:
         return v
-    # "%60" olmadan "60" da olabilir; sadece sayıysa ve 0<v<=100 ise al
     stripped = text.strip().replace(" ", "")
+    # "%0" / "%0.00" / "%0,00" / "0%" — tamamen sıfır oran (yeni sözleşmede hak ediş %0).
+    # parse_oran_from_text sıfırı reddediyor (0 < v kontrolü); açık tamamen-sıfır kalıbını
+    # burada ele al. "%0,5" gibi sıfırdan büyük değerler bu fullmatch'e takılmaz.
+    if re.fullmatch(r"%?0+(?:[.,]0+)?%?", stripped):
+        return 0.0
+    # "%60" olmadan "60" da olabilir; sadece sayıysa ve 0<v<=100 ise al
     if re.fullmatch(r"\d{1,3}(?:[.,]\d{1,4})?", stripped):
         try:
             v2 = float(stripped.replace(",", "."))
@@ -1099,14 +1180,18 @@ def _parse_date_string(text: str) -> date | None:
     return None
 
 
-def _detect_bes_giris_tarihi(boxes: list[_BBox]) -> date | None:
-    """BES Giriş Tarihi etiketinin yanındaki DD/MM/YYYY tarihini bbox uzamsal yakınlıkla çıkar.
+def _detect_date_near_label(boxes: list[_BBox], phrases: tuple[str, ...]) -> date | None:
+    """Verilen etiket phrase'lerine en yakın DD/MM/YYYY tarihini bbox uzamsal yakınlıkla çıkar.
 
-    Aynı satır sağda öncelikli (priority 0); yoksa altında aynı sütun (priority 1).
-    Eşit ekranda «Emeklilik Tarihiniz: 04/08/2041» gibi farklı tarihler de bulunabilir —
-    yalnızca «BES Giriş Tarihi» etiketine en yakın olan seçilir.
+    Öncelik:
+      0 — aynı satır sağda (en güçlü sinyal)
+      1 — sağda ama dikey biraz kaymış — "Otomatik BES / Giriş Tarihi" gibi 2 satıra
+          bölünmüş etiketler. Tarih genelde ilk satıra hizalı, eşleşen label kutusu (alt
+          satır) ile aynı row'da olmaz. ±2 label height tolerans; uzaktaki tarihler
+          ("Emeklilik Tarihiniz" 3-4h aşağıda) karışmaz.
+      2 — altında aynı sütun
     """
-    label = _find_label_box(boxes, _BES_GIRIS_PHRASES)
+    label = _find_label_box(boxes, phrases)
     if label is None:
         return None
     # Inline (etiket kutusunun kendi metni içinde tarih varsa)
@@ -1126,16 +1211,10 @@ def _detect_bes_giris_tarihi(boxes: list[_BBox]) -> date | None:
         y_ov = _vertical_overlap(label, b)
         x_ov = _horizontal_overlap(label, b)
         right_of_label = b.x_min >= label.x_max - 0.1 * w
-        # 1) Aynı satır sağda — en güçlü sinyal
         if y_ov >= 0.5 * min(h, b.h) and right_of_label:
             score = (0, max(0.0, b.x_min - label.x_max))
-        # 2) Sağda ama dikey biraz kaymış — "Otomatik BES / Giriş Tarihi" gibi 2 satıra
-        # bölünmüş etiketler. Tarih genelde ilk satıra hizalı, eşleşen label kutusu (alt
-        # satır) ile aynı row'da olmaz. ±2 label height tolerans yeterli; "Emeklilik
-        # Tarihiniz" 3-4h aşağıda olduğu için karışmaz.
         elif right_of_label and abs(b.y_cen - label.y_cen) <= 2.0 * h:
             score = (1, abs(b.y_cen - label.y_cen))
-        # 3) Altında aynı sütun
         else:
             below = b.y_min >= label.y_cen
             x_aligned = x_ov > 0 or abs(b.x_cen - label.x_cen) < max(w, b.w) * 0.7
@@ -1146,6 +1225,57 @@ def _detect_bes_giris_tarihi(boxes: list[_BBox]) -> date | None:
             best_score = score
             best_date = d_obj
     return best_date
+
+
+def _detect_bes_giris_tarihi(boxes: list[_BBox]) -> date | None:
+    """«BES Giriş Tarihi» — BES sistemine İLK giriş tarihi (sözleşme başlangıcı DEĞİL).
+
+    Garanti mobil kompakt ve "Otomatik BES" ekranlarında görünür. DİKKAT: stopaj/hak ediş
+    sözleşme bazlı hesaplanır — bu tarih sözleşme başlangıcına eşit DEĞİLSE (kullanıcı eski
+    BES üyesi ama yeni sözleşme açmışsa) yanlış süre verir. App tarafında
+    `sozlesme_baslangic_tarihi` varsa ona öncelik verilir; bu yalnızca yedek.
+    """
+    return _detect_date_near_label(boxes, _BES_GIRIS_PHRASES)
+
+
+# Sözleşme başlangıç tarihi — Garanti teklif/sözleşme detayı ekranında birkaç eşdeğer
+# etiketle gösterilir. Öncelik: Yürürlük > Hakediş Baz > Teklif Başlangıç. Pratikte
+# üçü de aynı tarih; biri OCR'da bölünüp okunamazsa diğeri yedek olur.
+_YURURLUK_PHRASES: tuple[str, ...] = (
+    "yürürlük tarihi",
+    "yururluk tarihi",
+    "yürürlük",
+    "yururluk",
+)
+_HAKEDIS_BAZ_PHRASES: tuple[str, ...] = (
+    "devlet katkısı hakediş baz tarihi",
+    "devlet katkisi hakedis baz tarihi",
+    "hakediş baz tarihi",
+    "hakedis baz tarihi",
+    "hakediş baz",
+    "hakedis baz",
+)
+_TEKLIF_BASLANGIC_PHRASES: tuple[str, ...] = (
+    "teklif başlangıç tarihi",
+    "teklif baslangic tarihi",
+    "teklif başlangıç",
+    "teklif baslangic",
+)
+
+
+def _detect_sozlesme_baslangic_tarihi(boxes: list[_BBox]) -> date | None:
+    """Sözleşme başlangıç tarihi — stopaj/hak ediş süresi için DOĞRU kaynak.
+
+    "BES Giriş Tarihi" (sistem giriş) yerine bunu kullanmak gerekir: aynı kişi 2009'da
+    BES'e girip 2026'da yeni bir sözleşme açmış olabilir; stopaj ve hak ediş kademeleri
+    sözleşme bazlıdır. Öncelik sırası: Yürürlük Tarihi > Devlet Katkısı Hakediş Baz
+    Tarihi > Teklif Başlangıç Tarihi (üçü genelde aynı; biri okunamazsa diğeri yedek).
+    """
+    for phrases in (_YURURLUK_PHRASES, _HAKEDIS_BAZ_PHRASES, _TEKLIF_BASLANGIC_PHRASES):
+        d = _detect_date_near_label(boxes, phrases)
+        if d is not None:
+            return d
+    return None
 
 
 _GIRIS_LABEL_RE = re.compile(r"^\s*(?:GİRİŞ|GIRIS|giriş|giris)\s*$", re.IGNORECASE)
@@ -1303,7 +1433,10 @@ def extract_from_ocr_boxes(raw: list[tuple[Any, str, float]]) -> BesExtracted:
 
     # Sözleşme giriş yılı — gauge altındaki «YYYY GİRİŞ» etiketinden
     out.giris_yili = _detect_giris_yili(boxes)
-    # BES Giriş Tarihi — varsa giris_yili'na tercih edilir (app.py auto-derive zinciri)
+    # BES Giriş Tarihi (sistem giriş) — giris_yili'na tercih edilir, ama
+    # sozlesme_baslangic_tarihi'ndan SONRA gelir (app.py auto-derive zinciri).
     out.bes_giris_tarihi = _detect_bes_giris_tarihi(boxes)
+    # Sözleşme başlangıç tarihi — stopaj/hak ediş için doğru kaynak, en yüksek öncelik.
+    out.sozlesme_baslangic_tarihi = _detect_sozlesme_baslangic_tarihi(boxes)
 
     return out

@@ -4,36 +4,22 @@ Cowork modunda yapılanların ardından kalanlar. Öncelik sırasıyla:
 
 ## Yüksek öncelik
 
-### 1. ⚠️ "BES Giriş Tarihi" yerine sözleşme başlangıç tarihi (DOĞRULUK BUG'I)
-Mevcut parser Garanti mobil ekranındaki **"BES Giriş Tarihi"** alanını süre
-kaynağı olarak kullanıyor — ama bu alan **BES sistemine ilk giriş tarihi**dir,
-**sözleşme başlangıç tarihi** değildir. Stopaj kademe (%5/%10/%15) ve hak ediş
-kademe (%0/%15/%35/%60) **sözleşme bazlı** hesaplanır → yanlış değer kullanmak
-hesabı bozar.
+### 1. "BES Giriş Tarihi" yerine sözleşme başlangıç tarihi ✅ TAMAMLANDI
+Parser artık Garanti teklif/sözleşme detayı ekranından **sözleşme başlangıç
+tarihini** çıkarıyor — "Yürürlük Tarihi" > "Devlet Katkısı Hakediş Baz Tarihi" >
+"Teklif Başlangıç Tarihi" öncelik sırasıyla. `BesExtracted.sozlesme_baslangic_tarihi`
+alanı app.py auto-derive zincirinde **en yüksek öncelikli** kaynak; `bes_giris_tarihi`
+ondan sonra (kullanıldığında UI'da "bu sistem giriş tarihidir, yeni sözleşme açtıysanız
+elle düzeltin" uyarısı gösterilir), `giris_yili` (gauge) en son.
 
-**Örnek:** Kullanıcı 2009'da BES'e ilk girmiş ama 2026'da yeni bir sözleşme
-açıp 2027'de çıkıyor. Doğru süre 1 yıl (sözleşmenin ömrü), bizim parser 17 yıl
-(sistem giriş) der → stopaj %15 yerine %10, hak ediş %0 yerine %60 hesaplanır.
-Devlet katkısının tamamı kayıp olması gerekirken hak edilmiş gibi görünür.
-
-**Yapılacak:**
-1. Garanti'nin diğer ekranlarında **sözleşme başlangıç tarihi** nerede gösteriliyor
-   araştır (kullanıcı keşfedecek). Bilinen muhtemel ekranlar: "Sözleşme Detayı",
-   "Plan Detayı", PDF olarak indirilebilen sözleşme özeti.
-2. Parser'a `sozlesme_baslangic_tarihi` alanı ekle (yeni phrase: muhtemelen
-   "sözleşme başlangıç tarihi", "sözleşme tarihi", "başlangıç tarihi" varyantları).
-3. `BesExtracted.sozlesme_baslangic_tarihi` alanı (`bes_giris_tarihi`'na ek).
-4. Auto-derive zinciri sırası:
-   - `sozlesme_baslangic_tarihi` varsa: bunu kullan (en kesin)
-   - `bes_giris_tarihi` varsa: kullan AMA UI'a uyarı: "Bu tarih BES sistem giriş
-     tarihinizdir; eğer sonradan **yeni sözleşme** açtıysanız sözleşme başlangıç
-     tarihini elle girin"
-   - `giris_yili` (gauge) varsa: conservative tahmin (eski mantık)
-5. `tests/test_bes_parse_boxes.py`'a regression: hem yeni alan parse, hem öncelik
-   sırası.
-
-**Not:** Bu, deployment'ı kullanan herkes için potansiyel yanlış hesaplama riski
-demektir. Acil değil ama yüksek öncelik — kullanıcı araştırması bitince ele alalım.
+Ek olarak bu ekranın varyantı için:
+- Yeni phrase'ler: "Tahsilat Tutarı", "Birikim Tutarı", "Hak Edilen Devlet Katkısı
+  Oranı/Tutarı", "Devlet Katkısı Birikimi"
+- `_find_label_box` çok satıra bölünmüş etiketleri (union bbox) birleştiriyor
+- `_parse_money`/`_parse_oran` açık currency-formatlı sıfırı kabul ediyor ("0,00 TL", "%0.00")
+- app.py: yatırım getirisi ters türetme (Getiri = Birikim − Ödenen) — bu ekranda
+  "Yatırım Getiriniz" ayrı kalem değil
+- 9 yeni sentetik bbox testi + `tests/fixtures/screenshots/senaryo_garanti_teklif_detay/`
 
 ### 2. Gauge needle / cyan-fill ile süre tespiti (görüntü analizi)
 Bazı mobil layout'larda gauge altındaki "YYYY GİRİŞ" yazısı sığmıyor → bizim

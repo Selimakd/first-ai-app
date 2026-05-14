@@ -133,10 +133,12 @@ if st.session_state.pop("_do_clear_all", False):
     st.session_state.pop("last_ocr_birlesik", None)
     st.session_state.pop("last_ocr_eslesme", None)
     st.session_state.pop("_birikim_ocr_turetildi", None)
+    st.session_state.pop("_getiri_ocr_turetildi", None)
     st.session_state.pop("_oran_ocr_turetildi", None)
     st.session_state.pop("_he_ocr_turetildi", None)
     st.session_state.pop("_sure_giris_yili_turetildi", None)
     st.session_state.pop("_sure_baslangic_tarihinden_turetildi", None)
+    st.session_state.pop("_sure_sozlesme_tarihinden_turetildi", None)
     st.session_state.pop("_last_ocr_file_sig", None)
     st.session_state["cikis_sozlesme_tipi"] = "devlet_katkisiz"
     st.rerun()
@@ -271,34 +273,54 @@ if (run or _auto_run) and files:
     else:
         st.session_state.pop("_birikim_ocr_turetildi", None)
 
-    # Süre OCR'da yoksa, iki kaynaktan türet:
-    #   1. BES Giriş Tarihi (DD/MM/YYYY) — Garanti mobil kompakt ekran. Tam tarih
-    #      bilindiği için floor((bugün - tarih)/365.25) ile KESİN yıl çıkar.
-    #   2. Gauge'taki «YYYY GİRİŞ» — ay/gün bilinmediği için (current_year - gy - 1)
-    #      conservative tıraş. Sebebi: calendar yıl farkı OVERSHOOT eder, undershoot'a
-    #      dönüştürmek kullanıcının elle düzeltmesini sağlar (sessiz overshoot hesaba sızar).
-    # Tarih varsa daima tercih edilir (1 her zaman 2'den daha kesin).
-    if extracted_dict.get("hak_edise_esas_sure") is None and merged_extract.bes_giris_tarihi is not None:
-        bgt = merged_extract.bes_giris_tarihi
-        today = datetime.now().date()
-        days = (today - bgt).days
-        sure_yil = max(0, int(days // 365.25))
-        extracted_dict["hak_edise_esas_sure"] = float(sure_yil)
-        st.session_state["_sure_baslangic_tarihinden_turetildi"] = (bgt, today, sure_yil)
-        st.session_state.pop("_sure_giris_yili_turetildi", None)
-    elif (
-        extracted_dict.get("hak_edise_esas_sure") is None
-        and merged_extract.giris_yili is not None
+    # Yatırım getirisi TERS türetme: Garanti teklif/sözleşme detayı ekranında "Yatırım
+    # Getiriniz" alanı YOK ama "Birikim Tutarı" + "Tahsilat Tutarı" var → aynı kimlikten
+    # (Getiri = Birikim − Ödenen) ters yönde türet. Birikim forward-derive ile mutually
+    # exclusive (biri birikim'i diğeri getiri'yi doldurur).
+    if (
+        extracted_dict.get("yatirim_getiriniz") is None
+        and extracted_dict.get("birikiminiz") is not None
+        and extracted_dict.get("odenen_toplam_tutar") is not None
     ):
-        gy = merged_extract.giris_yili
-        cy = datetime.now().year
-        sure_tahmin = max(0, cy - gy - 1)
-        extracted_dict["hak_edise_esas_sure"] = float(sure_tahmin)
-        st.session_state["_sure_giris_yili_turetildi"] = (gy, cy, sure_tahmin)
-        st.session_state.pop("_sure_baslangic_tarihinden_turetildi", None)
+        extracted_dict["yatirim_getiriniz"] = (
+            extracted_dict["birikiminiz"] - extracted_dict["odenen_toplam_tutar"]
+        )
+        st.session_state["_getiri_ocr_turetildi"] = True
     else:
-        st.session_state.pop("_sure_giris_yili_turetildi", None)
-        st.session_state.pop("_sure_baslangic_tarihinden_turetildi", None)
+        st.session_state.pop("_getiri_ocr_turetildi", None)
+
+    # Süre OCR'da yoksa, ÜÇ kaynaktan öncelik sırasıyla türet:
+    #   1. Sözleşme başlangıç tarihi (Yürürlük/Hakediş Baz/Teklif) — stopaj+hak ediş için
+    #      DOĞRU kaynak. Tam tarih → floor((bugün-tarih)/365.25) ile kesin yıl.
+    #   2. BES Giriş Tarihi — BES sistemine İLK giriş; sözleşme başlangıcına EŞİT
+    #      OLMAYABİLİR (eski üye + yeni sözleşme). Kullanılırsa UI'da uyarı gösterilir.
+    #   3. Gauge'taki «YYYY GİRİŞ» — ay/gün yok; (current_year - gy - 1) conservative
+    #      tıraş (overshoot riski yerine undershoot → kullanıcı elle düzeltir).
+    # Önce tüm süre-türetme bayraklarını temizle, sonra uygun kaynağı işaretle.
+    for _k in (
+        "_sure_sozlesme_tarihinden_turetildi",
+        "_sure_baslangic_tarihinden_turetildi",
+        "_sure_giris_yili_turetildi",
+    ):
+        st.session_state.pop(_k, None)
+    if extracted_dict.get("hak_edise_esas_sure") is None:
+        today = datetime.now().date()
+        if merged_extract.sozlesme_baslangic_tarihi is not None:
+            sbt = merged_extract.sozlesme_baslangic_tarihi
+            sure_yil = max(0, int((today - sbt).days // 365.25))
+            extracted_dict["hak_edise_esas_sure"] = float(sure_yil)
+            st.session_state["_sure_sozlesme_tarihinden_turetildi"] = (sbt, today, sure_yil)
+        elif merged_extract.bes_giris_tarihi is not None:
+            bgt = merged_extract.bes_giris_tarihi
+            sure_yil = max(0, int((today - bgt).days // 365.25))
+            extracted_dict["hak_edise_esas_sure"] = float(sure_yil)
+            st.session_state["_sure_baslangic_tarihinden_turetildi"] = (bgt, today, sure_yil)
+        elif merged_extract.giris_yili is not None:
+            gy = merged_extract.giris_yili
+            cy = today.year
+            sure_tahmin = max(0, cy - gy - 1)
+            extracted_dict["hak_edise_esas_sure"] = float(sure_tahmin)
+            st.session_state["_sure_giris_yili_turetildi"] = (gy, cy, sure_tahmin)
 
     # Devlet katkılı sözleşmede (devlet_katkisi OCR'dan geldiyse) hak ediş oran ve
     # tutarını süreden türet — EGM kademeleri (3y/6y/10y → %15/%35/%60).
@@ -555,13 +577,32 @@ elif hesap_hazir:
             f"Yatırım Getirisi ({format_tl(yg)}) = **{format_tl(b)} TL**. "
             "Birikim alanı boştu; üst kutuya elle bir değer yazarsanız o değer kullanılır."
         )
+    if st.session_state.get("_getiri_ocr_turetildi") and odenen is not None:
+        st.info(
+            f"**Yatırım getirisi otomatik türetildi:** Birikim Tutarı ({format_tl(b)}) − "
+            f"Ödenen/Tahsilat ({format_tl(odenen)}) = **{format_tl(yg)} TL**. "
+            "Bu ekranda «Yatırım Getiriniz» ayrı bir kalem değildi; kutuya elle "
+            "yazarsanız o değer kullanılır."
+        )
+    sure_info_sbt = st.session_state.get("_sure_sozlesme_tarihinden_turetildi")
+    if sure_info_sbt:
+        sbt, today_d, sy_t = sure_info_sbt
+        st.info(
+            f"**Süre sözleşme başlangıç tarihinden hesaplandı:** {sbt.strftime('%d/%m/%Y')} → "
+            f"bugün ({today_d.strftime('%d/%m/%Y')}) = **{sy_t} yıl** "
+            "(Yürürlük / Hakediş Baz / Teklif Başlangıç tarihinden; ay/gün dahil tam yıl). "
+            "Stopaj ve hak ediş bu süreye göre hesaplanır."
+        )
     sure_info_bgt = st.session_state.get("_sure_baslangic_tarihinden_turetildi")
     if sure_info_bgt:
         bgt, today_d, sy_t = sure_info_bgt
-        st.info(
+        st.warning(
             f"**Süre BES Giriş Tarihi'nden hesaplandı:** {bgt.strftime('%d/%m/%Y')} → "
-            f"bugün ({today_d.strftime('%d/%m/%Y')}) = **{sy_t} yıl** "
-            "(floor((bugün − tarih) / 365,25); ay/gün dahil tam yıl)."
+            f"bugün ({today_d.strftime('%d/%m/%Y')}) = **{sy_t} yıl**. "
+            "⚠️ Bu tarih **BES sistemine ilk giriş** tarihinizdir — sözleşme başlangıcı "
+            "değil. Sonradan **yeni bir sözleşme** açtıysanız gerçek süre daha kısadır; "
+            "stopaj/hak ediş yanlış çıkmaması için «Hak edişe esas süre» kutusunu elle "
+            "düzeltin."
         )
     sure_info = st.session_state.get("_sure_giris_yili_turetildi")
     if sure_info:
