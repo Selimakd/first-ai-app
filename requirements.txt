@@ -7,3 +7,7 @@ streamlit>=1.40.0
 Pillow>=10.0.0
 numpy>=1.24.0,<2.0
 opencv-python-headless>=4.8.0
+# API kanalı (api.py — iOS Kısayol). Web Space'inde kurulu ama kullanılmaz (zararsız).
+fastapi>=0.110.0
+uvicorn>=0.29.0
+python-multipart>=0.0.9

@@ -280,9 +280,12 @@ if (run or _auto_run) and files:
         and extracted_dict.get("odenen_toplam_tutar") is not None
         and extracted_dict.get("yatirim_getiriniz") is not None
     ):
-        extracted_dict["birikiminiz"] = (
+        # round(.., 2): para kuruş hassasiyetinde — float toplama artığını ele
+        # (aksi halde widget'a "609820,0100000001" gibi değer yazılabilir).
+        extracted_dict["birikiminiz"] = round(
             extracted_dict["odenen_toplam_tutar"]
-            + extracted_dict["yatirim_getiriniz"]
+            + extracted_dict["yatirim_getiriniz"],
+            2,
         )
         st.session_state["_birikim_ocr_turetildi"] = True
     else:
@@ -297,8 +300,10 @@ if (run or _auto_run) and files:
         and extracted_dict.get("birikiminiz") is not None
         and extracted_dict.get("odenen_toplam_tutar") is not None
     ):
-        extracted_dict["yatirim_getiriniz"] = (
-            extracted_dict["birikiminiz"] - extracted_dict["odenen_toplam_tutar"]
+        # round(.., 2): 2635.47 - 1690.0 = 945.4699999999998 gibi float artığını ele —
+        # aksi halde widget'a uzun ondalıklı değer yazılır.
+        extracted_dict["yatirim_getiriniz"] = round(
+            extracted_dict["birikiminiz"] - extracted_dict["odenen_toplam_tutar"], 2
         )
         st.session_state["_getiri_ocr_turetildi"] = True
     else:
@@ -553,7 +558,7 @@ oran_goster = (st.session_state.get(_widget_key("hak_edis_oraniniz")) or "").str
 #     ama hesap için yine doğru değer kullanılır).
 b_turetildi_manuel = False
 if b is None and odenen is not None and yg is not None:
-    b = odenen + yg
+    b = round(odenen + yg, 2)  # para kuruş hassasiyetinde — float toplama artığını ele
     b_turetildi_manuel = True
 b_turetildi = b_turetildi_manuel or st.session_state.get("_birikim_ocr_turetildi", False)
 

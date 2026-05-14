@@ -33,13 +33,17 @@ Yeni e2e fixture eklemek için: `tests/fixtures/screenshots/README.md`'yi oku.
 src/
 ├── bes_parse.py     # OCR çıktısı → BesExtracted (alanlar). bbox-aware + line fallback.
 ├── bes_calc.py      # Stopaj, hak ediş kademeleri, çıkış formülü.
-└── ocr_engine.py    # EasyOCR wrapper. Lazy reader cache.
+├── bes_pipeline.py  # Kanal-bağımsız parse+türetme+hesap zinciri (run_pipeline).
+└── ocr_engine.py    # EasyOCR wrapper. Lazy reader cache. Görüntü uzun-kenar kısma.
 
 tests/
 ├── test_bes_calc.py           # Stopaj + hak ediş oran tabloları (saf testler)
 ├── test_bes_parse_helpers.py  # Sayı parse, fold_tr_ascii, vb.
 ├── test_bes_parse_extract.py  # extract_from_ocr_lines (eski) sentetik testler
 ├── test_bes_parse_boxes.py    # extract_from_ocr_boxes (yeni) sentetik bbox testler
+├── test_bes_pipeline.py       # run_pipeline (kanal-bağımsız çekirdek) testleri
+├── test_ocr_engine.py         # ocr_target_size (görüntü boyutlandırma) testleri
+├── test_api.py                # api.py — metin biçimleme, routing, auth (+ slow e2e)
 └── test_e2e_screenshots.py    # Fixture görüntülerle uçtan uca (slow)
 
 tools/
@@ -48,10 +52,30 @@ tools/
 ├── test_garanti_*.py             # Garanti senaryo simülasyonları
 └── ...
 
-app.py             # Streamlit UI. OCR akışı, auto-derive'lar, sözleşme tipi seçimi.
+docs/
+└── ios-kisayol.md   # iOS Kısayol kanalı kurulumu (API Space + Shortcut adımları).
+
+app.py             # Streamlit UI (web kanalı). OCR akışı, auto-derive, sözleşme tipi.
+api.py             # FastAPI (API kanalı — iOS Kısayol). POST /hesapla → run_pipeline.
+start.sh           # APP_MODE'a göre streamlit (web) veya uvicorn (api) başlatır.
 run.sh             # HOME'u proje içine yönlendiren launcher (sandbox uyumlu).
 start_streamlit.command  # Finder çift-tık launcher.
 ```
+
+## Kanallar (web + API, ortak çekirdek)
+
+Web arayüzü (`app.py`/Streamlit) ve API (`api.py`/FastAPI) **aynı `src/` çekirdeğini**
+paylaşır. `bes_pipeline.run_pipeline` OCR ham çıktısından tam hesaba kadar olan
+zinciri kapsar (parse → birikim/getiri türetme → süre türetme → sözleşme tipi →
+hak ediş → hesap) — Streamlit/session_state bağımsız.
+
+Tek git repo iki HF Space'i besler: `start.sh` `APP_MODE` env değişkenine bakar
+(`api` → uvicorn, diğer/unset → streamlit). API Space'inde `APP_MODE=api` Space
+variable set edilir. Web Space dokunulmaz.
+
+NOT: `app.py` şu an kendi inline auto-derive kopyasını korur (web arayüzü güvenliği
+için); `bes_pipeline` ile aynı semantiği uygular, regression testleri kilitler.
+İleride app.py de pipeline'a refactor edilebilir.
 
 ## Mimari kararlar
 

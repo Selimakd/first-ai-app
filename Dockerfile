@@ -27,11 +27,8 @@ COPY --chown=user . .
 
 EXPOSE 8501
 
-# headless=true: tarayıcı otomatik açılmasın (container'da X yok)
-# address=0.0.0.0: HF Spaces dışarıdan erişebilsin
-# enableXsrfProtection=false: HF Spaces iframe wrap için gerekli olabilir
-CMD ["streamlit", "run", "app.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--server.enableXsrfProtection=false"]
+# start.sh APP_MODE'a göre kanal seçer:
+#   APP_MODE unset → streamlit (web arayüzü; eski CMD ile birebir aynı komut)
+#   APP_MODE=api   → uvicorn (BES hesap API; iOS Kısayol kanalı)
+# Tek repo iki HF Space'i besler — API Space'inde APP_MODE=api Space variable set edilir.
+CMD ["bash", "start.sh"]

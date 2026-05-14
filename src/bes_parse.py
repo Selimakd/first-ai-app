@@ -79,7 +79,13 @@ FIELD_PHRASES: dict[str, tuple[str, ...]] = {
         "devlet katkisi",
     ),
     "birikiminiz": (
-        "toplam birikiminiz",  # bazı şirketler bu başlığı kullanır (devlet katkısız ekran)
+        # NOT: "toplam birikiminiz" BİLEREK phrase olarak yok. Bazı ekranlarda
+        # ("devlet katkılı" Fon Koçu gibi) HEM "Birikiminiz" (gerçek birikim) HEM
+        # "Toplam Birikiminiz" (birikim + devlet katkısı = grand total) bulunur.
+        # "birikiminiz" zaten "toplam birikiminiz"in alt dizisi → phrase olarak onu
+        # da yakalar; _find_label_box'ın -extra eşitlik bozucusu daha temiz olan
+        # "Birikiminiz" kutusunu seçer. Tek başlık "Toplam Birikiminiz" olan
+        # ekranlarda da tek aday olarak yine doğru yakalanır.
         "birikim tutarı",  # Garanti teklif/sözleşme detayı — "Birikim Tutarı (Devlet Katkısı Hariç)"
         "birikim tutari",
         "birikiminiz",

@@ -21,7 +21,30 @@ Ek olarak bu ekranın varyantı için:
   "Yatırım Getiriniz" ayrı kalem değil
 - 9 yeni sentetik bbox testi + `tests/fixtures/screenshots/senaryo_garanti_teklif_detay/`
 
-### 2. Gauge needle / cyan-fill ile süre tespiti (görüntü analizi)
+### 2. Çoklu kanal — ekran görüntüsü paylaş, tutarı al (epik)
+Web arayüzünde çok adım var (kaydet, siteyi aç, upload, seç, çalıştır). Ekran
+görüntüsü paylaşıp tek atışta sonuç almak için ek kanallar.
+
+Mimari: `api.py` (FastAPI) `src/bes_pipeline.py` (kanal-bağımsız parse+türetme+hesap
+çekirdeği) kullanır. Web arayüzü (`app.py` / Streamlit) bundan tamamen bağımsız.
+`start.sh` `APP_MODE` ortam değişkenine göre kanal seçer — tek git repo, iki HF Space.
+
+- **Faz 1 — iOS Kısayol ✅ TAMAMLANDI**
+  `api.py` (`POST /hesapla`), `start.sh`, mode-aware Dockerfile, `bes_pipeline.py`
+  + testleri. Kurulum: `docs/ios-kisayol.md`. Ekran görüntüsü → Paylaş → "BES
+  Hesapla" → bildirim. 2 dokunuş, uygulamadan çıkmadan.
+- **Faz 2 — Telegram bot** (Android tanıdıklar için)
+  `python-telegram-bot`, webhook modu, aynı `bes_pipeline` çekirdeği. Aynı HF
+  Space içinde veya ayrı Space. @BotFather token'ı yeterli, kurulum hafif.
+- **Faz 3 — WhatsApp** (TR'de yaygın ama kurulum ağır)
+  Meta Business hesabı + işletme doğrulama + WhatsApp Cloud API webhook. Faz 2
+  çalışıp değer kanıtlandıktan sonra.
+
+İleride: `app.py` da `bes_pipeline.run_pipeline`'a refactor edilebilir (şu an
+auto-derive mantığı app.py'de inline + pipeline'da — ikisi aynı semantik, regression
+testleri kilitler).
+
+### 3. Gauge needle / cyan-fill ile süre tespiti (görüntü analizi)
 Bazı mobil layout'larda gauge altındaki "YYYY GİRİŞ" yazısı sığmıyor → bizim
 mevcut süre auto-derive zinciri (CLAUDE.md #2) çalışmıyor → kullanıcı süreyi
 elle girmek zorunda. Manuel akış artık çalışıyor (app.py'a hak ediş tutar/oran
@@ -37,13 +60,13 @@ Yeni modül `src/gauge_detect.py`. Auto-derive zincirine #2'den önce eklenir.
 Sentetik test fixture (3 kademe için PNG simülasyonu) + e2e regression. Tahmini
 1-2 saat. Alternatif (needle açısı) daha hassas ama daha gürültülü, kademe yeterli.
 
-### 3. Web deployment ✅ TAMAMLANDI
+### 4. Web deployment ✅ TAMAMLANDI
 HF Spaces + Docker SDK ile deploy edildi. Parola gate (APP_PASSWORD secret).
 URL: huggingface.co/spaces/Selimakd/bes-cikis. CPU Basic free tier yeterli.
 
 ## Orta öncelik
 
-### 4. Diğer şirket varyasyonları
+### 5. Diğer şirket varyasyonları
 Şu an Garanti web + mobil + 2 katkılı senaryo destekli. Test edilmemiş:
 Anadolu Hayat, Allianz, Ziraat, AvivaSA, Aegon, vb. Her şirketin etiket
 sözcüğü + layout farklı; `FIELD_PHRASES`'e yeni sinonimler + bbox toleransı.
@@ -55,15 +78,15 @@ Yeni şirket eklemek için akış:
 4. Test geçince `tests/fixtures/screenshots/senaryo_<sirket>_*/` altına PNG + `beklenen.json`
 5. Regression olarak `test_bes_parse_boxes.py`'a unit test ekle
 
-### 5. Çıkış ledger / hesap geçmişi
+### 6. Çıkış ledger / hesap geçmişi
 Streamlit session_state geçici. Kullanıcı farklı sözleşmeleri / tarihleri
 karşılaştırmak isteyebilir. Local SQLite'a geçmiş kaydı (kullanıcı opt-in).
 
-### 6. PDF rapor üretimi
+### 7. PDF rapor üretimi
 "Çıkış sonucunu PDF olarak kaydet" — kullanıcı muhasebeci / eşine paylaşmak
 isteyebilir. ReportLab veya weasyprint.
 
-### 7. Sözleşme başlangıç tarihi DD/MM/YYYY parse altyapısı ✅ TAMAMLANDI
+### 8. Sözleşme başlangıç tarihi DD/MM/YYYY parse altyapısı ✅ TAMAMLANDI
 Tarih regex + bbox-aware spatial detection eklendi. `_detect_bes_giris_tarihi`
 `BesExtracted.bes_giris_tarihi` üretiyor. NOT: Şu an "BES Giriş Tarihi" alanını
 parse ediyor — bunun sözleşme başlangıç tarihinin doğru kaynağı olmadığı #1'de
@@ -71,14 +94,14 @@ açıklandı; altyapı hazır, doğru kaynağa geçişe hazır.
 
 ## Düşük öncelik / temizlik
 
-### 8. ORAN_PATTERN_NUM_FIRST regex küçük bug
+### 9. ORAN_PATTERN_NUM_FIRST regex küçük bug
 `(\d{1,3}(?:,\d{1,4})?|\d+(?:\.\d+)?)\s*%` — alternation sırası kötü. Bkz REVIEW.md.
 
-### 9. Auto-detect "Yatırılan + Getirisi = Devlet Katkısı" identity check
+### 10. Auto-detect "Yatırılan + Getirisi = Devlet Katkısı" identity check
 Her devlet katkılı ekranda parser bu identity'yi cross-check edip mismatch'te uyarı verebilir
 (OCR yanlışlığı tespiti).
 
-### 10. Çoklu sözleşme desteği
+### 11. Çoklu sözleşme desteği
 Bir kullanıcının birden fazla BES sözleşmesi olabilir. Şu an tek sözleşme bazlı UI;
 çoklu sözleşmeyi tab'lara ayırma fikri.
 
