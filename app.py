@@ -13,6 +13,7 @@ OCR sonuçları alanlara birleştirilir.
 from __future__ import annotations
 
 import os
+import time
 from datetime import date, datetime
 
 import streamlit as st
@@ -32,7 +33,7 @@ from src.bes_parse import (
     infer_devlet_katkili_sozlesme,
     tr_amount_to_float,
 )
-from src.ocr_engine import read_text, sorted_lines
+from src.ocr_engine import get_reader, read_text, sorted_lines
 
 # Tarayıcı sekmesi + sayfa başlığı; yeni sürümün yüklendiğini görmek için anlamlı her değişiklikte artırın (1.1 → 1.2 …).
 APP_VERSION = "2.0"
@@ -219,11 +220,21 @@ if (run or _auto_run) and files:
     # PAD: dosyalar arasında değer-etiket çağrışımını önlemek için bolca boşluk.
     Y_PAD_BETWEEN_FILES = 2000
     y_offset = 0
+    # Performans enstrümantasyonu: model hazırlama (ilk yüklemede ağır) ile saf OCR
+    # çıkarımını AYIR. get_reader() singleton — cache çalışıyorsa 2. çalıştırmada ~0 sn.
+    _t_reader0 = time.perf_counter()
+    with st.spinner("OCR motoru hazırlanıyor…"):
+        get_reader()
+    _reader_prep_s = time.perf_counter() - _t_reader0
+    _ocr_timings: list[tuple[str, int, int, float]] = []  # (dosya, w, h, çıkarım_sn)
     for f in files:
         f.seek(0)
         image = Image.open(f)
+        _img_w, _img_h = image.size
+        _t_ocr0 = time.perf_counter()
         with st.spinner(f"OCR: {f.name}…"):
             results = read_text(image, upscale=upscale)
+        _ocr_timings.append((f.name, _img_w, _img_h, time.perf_counter() - _t_ocr0))
         ordered = sorted_lines(results)
         lines = [t for _, t, _ in ordered]
         agg_lines.extend(lines)
@@ -363,6 +374,20 @@ if (run or _auto_run) and files:
             "OCR tamam; **yalnızca boş** kutular dolduruldu — dolu alanlar eski sözleşmeden kalabilir. "
             "Farklı sözleşmede **Üzerine yaz** seçin."
         )
+
+    # Performans dökümü: model hazırlama vs saf OCR çıkarımı + görüntü boyutları.
+    # «model hazırlama» her çalıştırmada ~25 sn ise → konteyner restart / reader cache
+    # çalışmıyor. «çıkarım» yüksekse → büyük görüntü + yavaş CPU, görüntü kısma gerekir.
+    _ocr_toplam = sum(t[3] for t in _ocr_timings)
+    _zaman_satir = (
+        f"⏱️ **OCR zamanlaması** — Model hazırlama: **{_reader_prep_s:.1f} sn** · "
+        f"Çıkarım (toplam {len(_ocr_timings)} görüntü): **{_ocr_toplam:.1f} sn** · "
+        f"Parser: <0.1 sn"
+    )
+    _boyut_satir = " | ".join(
+        f"{ad[:16]}: {w}×{h}px → {sn:.1f} sn" for ad, w, h, sn in _ocr_timings
+    )
+    st.caption(_zaman_satir + ("  \n" + _boyut_satir if _boyut_satir else ""))
 
     yg_ocr = merged_extract.yatirim_getiriniz
     sy_ocr = merged_extract.hak_edise_esas_sure
