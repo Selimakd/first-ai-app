@@ -33,10 +33,10 @@ from src.bes_parse import (
     infer_devlet_katkili_sozlesme,
     tr_amount_to_float,
 )
-from src.ocr_engine import get_reader, read_text, sorted_lines
+from src.ocr_engine import get_reader, ocr_target_size, read_text, sorted_lines
 
 # Tarayıcı sekmesi + sayfa başlığı; yeni sürümün yüklendiğini görmek için anlamlı her değişiklikte artırın (1.1 → 1.2 …).
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 APP_DISPLAY_NAME = f"BES Çıkış Hesabı V{APP_VERSION}"
 
 FIELD_ROWS: list[tuple[str, str]] = [
@@ -226,15 +226,19 @@ if (run or _auto_run) and files:
     with st.spinner("OCR motoru hazırlanıyor…"):
         get_reader()
     _reader_prep_s = time.perf_counter() - _t_reader0
-    _ocr_timings: list[tuple[str, int, int, float]] = []  # (dosya, w, h, çıkarım_sn)
+    # (dosya, orijinal_w, orijinal_h, efektif_w, efektif_h, çıkarım_sn)
+    _ocr_timings: list[tuple[str, int, int, int, int, float]] = []
     for f in files:
         f.seek(0)
         image = Image.open(f)
         _img_w, _img_h = image.size
+        _eff_w, _eff_h = ocr_target_size(_img_w, _img_h, upscale)
         _t_ocr0 = time.perf_counter()
         with st.spinner(f"OCR: {f.name}…"):
             results = read_text(image, upscale=upscale)
-        _ocr_timings.append((f.name, _img_w, _img_h, time.perf_counter() - _t_ocr0))
+        _ocr_timings.append(
+            (f.name, _img_w, _img_h, _eff_w, _eff_h, time.perf_counter() - _t_ocr0)
+        )
         ordered = sorted_lines(results)
         lines = [t for _, t, _ in ordered]
         agg_lines.extend(lines)
@@ -378,14 +382,15 @@ if (run or _auto_run) and files:
     # Performans dökümü: model hazırlama vs saf OCR çıkarımı + görüntü boyutları.
     # «model hazırlama» her çalıştırmada ~25 sn ise → konteyner restart / reader cache
     # çalışmıyor. «çıkarım» yüksekse → büyük görüntü + yavaş CPU, görüntü kısma gerekir.
-    _ocr_toplam = sum(t[3] for t in _ocr_timings)
+    _ocr_toplam = sum(t[5] for t in _ocr_timings)
     _zaman_satir = (
         f"⏱️ **OCR zamanlaması** — Model hazırlama: **{_reader_prep_s:.1f} sn** · "
         f"Çıkarım (toplam {len(_ocr_timings)} görüntü): **{_ocr_toplam:.1f} sn** · "
         f"Parser: <0.1 sn"
     )
     _boyut_satir = " | ".join(
-        f"{ad[:16]}: {w}×{h}px → {sn:.1f} sn" for ad, w, h, sn in _ocr_timings
+        f"{ad[:16]}: {w}×{h}px → OCR {ew}×{eh}px → {sn:.1f} sn"
+        for ad, w, h, ew, eh, sn in _ocr_timings
     )
     st.caption(_zaman_satir + ("  \n" + _boyut_satir if _boyut_satir else ""))
 

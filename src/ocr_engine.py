@@ -29,15 +29,40 @@ def pil_to_bgr(img: Image.Image) -> np.ndarray:
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
+# OCR'a giren görüntünün uzun kenar üst sınırı. EasyOCR çıkarımı piksel sayısıyla
+# ölçeklenir; mobil screenshot'lar zaten yüksek çözünürlüklü (retina) olduğu için
+# kısmak doğruluk kaybetmeden çıkarımı ciddi hızlandırır — HF free tier paylaşımlı
+# CPU'da kritik. BES ekranlarında etiket/değer yazıları büyük; 1600px uzun kenarda
+# kısa kenar ~900px+ kalır, recognition için fazlasıyla yeterli.
+MAX_OCR_LONG_SIDE = 1600
+
+
+def ocr_target_size(w: int, h: int, scale: float) -> tuple[int, int]:
+    """Kullanıcı büyütmesi + uzun-kenar üst sınırı uygulanmış hedef (w, h).
+
+    Önce kullanıcı `scale`'i (küçük yazılı ekranlar için) uygulanır, sonra uzun kenar
+    MAX_OCR_LONG_SIDE'ı aşıyorsa oran korunarak kısılır. Büyük mobil ekranlarda slider
+    1.0 da 1.5 da olsa sonuç aynı üst sınıra iner.
+    """
+    tw, th = int(w * scale), int(h * scale)
+    long_side = max(tw, th)
+    if long_side > MAX_OCR_LONG_SIDE:
+        k = MAX_OCR_LONG_SIDE / long_side
+        tw, th = int(tw * k), int(th * k)
+    return max(tw, 1), max(th, 1)
+
+
 def preprocess_for_ocr(bgr: np.ndarray, scale: float = 1.5) -> np.ndarray:
-    """Ekran görüntülerinde küçük yazılar için hafif büyütme + gri ton."""
+    """Ekran görüntüsünü OCR'a hazırla: boyutlandırma + gri ton + kontrast.
+
+    Boyutlandırma: kullanıcı büyütmesi + uzun-kenar üst sınırı (bkz. ocr_target_size).
+    Büyük görüntüler kısılır (INTER_AREA), küçükler büyütülür (INTER_CUBIC).
+    """
     h, w = bgr.shape[:2]
-    if scale != 1.0:
-        bgr = cv2.resize(
-            bgr,
-            (int(w * scale), int(h * scale)),
-            interpolation=cv2.INTER_CUBIC,
-        )
+    tw, th = ocr_target_size(w, h, scale)
+    if (tw, th) != (w, h):
+        interp = cv2.INTER_AREA if (tw * th) < (w * h) else cv2.INTER_CUBIC
+        bgr = cv2.resize(bgr, (tw, th), interpolation=interp)
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     # Kontrast: çoğu mobil/web arayüzünde okunabilirliği artırır
     gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
