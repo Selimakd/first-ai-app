@@ -36,7 +36,7 @@ from src.bes_parse import (
 from src.ocr_engine import get_reader, read_text, sorted_lines
 
 # Tarayıcı sekmesi + sayfa başlığı; yeni sürümün yüklendiğini görmek için anlamlı her değişiklikte artırın (1.1 → 1.2 …).
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 APP_DISPLAY_NAME = f"BES Çıkış Hesabı V{APP_VERSION}"
 
 FIELD_ROWS: list[tuple[str, str]] = [
